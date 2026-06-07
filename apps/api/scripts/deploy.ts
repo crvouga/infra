@@ -24,5 +24,5 @@ if (token.length === 0) {
   process.exit(1);
 }
 
-run('wrangler', ['secret', 'put', 'DOPPLER_TOKEN', '--force'], token);
+run('wrangler', ['secret', 'put', 'DOPPLER_TOKEN'], token);
 run('wrangler', ['deploy']);

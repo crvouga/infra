@@ -13,6 +13,7 @@ on:
 
 env:
   DOPPLER_TOKEN: ${{ secrets.DOPPLER_SERVICE_TOKEN }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   check:
@@ -23,7 +24,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .nvmrc
@@ -61,7 +62,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .nvmrc
