@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveDopplerScope } from '@scripts/doppler-yaml-defaults';
+
 const apiRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function run(cmd: string, args: string[], input?: string): void {
@@ -24,5 +26,15 @@ if (token.length === 0) {
   process.exit(1);
 }
 
-run('wrangler', ['secret', 'put', 'DOPPLER_TOKEN'], token);
-run('wrangler', ['deploy']);
+const { config: dopplerConfig } = resolveDopplerScope({
+  envProject: process.env['DOPPLER_PROJECT'],
+  envConfig: process.env['DOPPLER_CONFIG'],
+});
+const wranglerEnv = dopplerConfig === 'dev' ? 'dev' : 'prd';
+
+run(
+  'wrangler',
+  ['secret', 'put', 'DOPPLER_TOKEN', '--env', wranglerEnv],
+  token
+);
+run('wrangler', ['deploy', '--env', wranglerEnv]);
