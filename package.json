@@ -15,6 +15,7 @@
     "dev": "bun run --filter @apps/api dev",
     "format": "prettier --write .",
     "gh:seed-doppler-service-token": "DOPPLER_CONFIG=prd bun run scripts/seed-github-doppler-service-token.ts",
+    "gh": "open https://github.com/crvouga/turborepo-remote-cache/actions/workflows/deployment-pipeline.yml",
     "setup": "bun run --filter @apps/api setup && bun run scripts/ensure-doppler-secrets.ts"
   },
   "devDependencies": {
