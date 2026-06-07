@@ -112,13 +112,11 @@ async function main(): Promise<void> {
     (await store.getOptional(DopplerSecretKey.turboToken))?.readSecretValue() ??
     '';
 
-  if (turboApi.length > 0 && turboToken.length > 0) {
+  // Skip cache smoke test in CI - the Worker doesn't exist until after deployment.
+  if (!isCi() && turboApi.length > 0 && turboToken.length > 0) {
     const smokeErr = await smokeCacheStatus(turboApi, turboToken);
     if (smokeErr !== null) {
-      if (strict) {
-        fail(`Cache smoke test failed: ${smokeErr}`);
-      }
-      console.log(`warn: cache smoke skipped/failed (non-CI): ${smokeErr}`);
+      console.log(`warn: cache smoke test failed: ${smokeErr}`);
     } else {
       console.log('Cache smoke OK (/v8/artifacts/status)');
     }
