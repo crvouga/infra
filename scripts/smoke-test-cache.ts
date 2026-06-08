@@ -5,6 +5,7 @@
  * CI: `bun run smoke:prd` after deploy.
  */
 import { DopplerSecretKey } from './doppler-secrets-registry';
+import { verifyB2S3Credentials } from './verify-b2-s3';
 
 const READINESS_ATTEMPTS = 10;
 const READINESS_DELAY_MS = 5_000;
@@ -39,6 +40,32 @@ function baseUrl(apiUrl: string): string {
 
 function authHeaders(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
+}
+
+async function formatHttpError(
+  method: string,
+  url: string,
+  res: Response
+): Promise<string> {
+  const status = String(res.status);
+  let detail = '';
+  try {
+    const contentType = res.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      const body = (await res.json()) as { error?: string };
+      if (typeof body.error === 'string' && body.error.length > 0) {
+        detail = `: ${body.error}`;
+      }
+    } else {
+      const text = (await res.text()).trim();
+      if (text.length > 0) {
+        detail = `: ${text.slice(0, 200)}`;
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return `${method} ${url} returned HTTP ${status}${detail}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -183,7 +210,7 @@ async function checkPutArtifact(
     if (res.status !== 200) {
       return {
         ok: false,
-        error: `PUT ${url} returned HTTP ${String(res.status)}`,
+        error: await formatHttpError('PUT', url, res),
       };
     }
     const body = (await res.json()) as { urls?: unknown[] };
@@ -214,7 +241,7 @@ async function checkHeadArtifact(
     if (res.status !== 200) {
       return {
         ok: false,
-        error: `HEAD ${url} returned HTTP ${String(res.status)}`,
+        error: await formatHttpError('HEAD', url, res),
       };
     }
     return { ok: true };
@@ -237,7 +264,7 @@ async function checkGetArtifact(
     if (res.status !== 200) {
       return {
         ok: false,
-        error: `GET ${url} returned HTTP ${String(res.status)}`,
+        error: await formatHttpError('GET', url, res),
       };
     }
     const tag = res.headers.get('x-artifact-tag');
@@ -288,7 +315,7 @@ async function checkExistenceMap(
     if (res.status !== 200) {
       return {
         ok: false,
-        error: `POST ${url} returned HTTP ${String(res.status)}`,
+        error: await formatHttpError('POST', url, res),
       };
     }
     const body = (await res.json()) as Record<string, boolean>;
@@ -361,6 +388,12 @@ async function main(): Promise<void> {
   const token = requireEnv(DopplerSecretKey.turboToken);
 
   console.log(`Remote cache smoke test (${baseUrl(apiUrl)})`);
+
+  const b2Err = await verifyB2S3Credentials();
+  if (b2Err !== null) {
+    fail(b2Err);
+  }
+  console.log('B2 S3 credentials OK');
 
   await waitForReady(apiUrl, token);
   await runSuite(apiUrl, token);

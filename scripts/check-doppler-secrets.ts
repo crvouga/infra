@@ -11,6 +11,7 @@ import {
   DopplerSecretKey,
   validateOptionalSecretFormat,
 } from './doppler-secrets-registry';
+import { verifyB2S3Credentials } from './verify-b2-s3';
 
 function isCi(): boolean {
   return (
@@ -103,6 +104,12 @@ async function main(): Promise<void> {
   for (const line of optionalWarnings) {
     console.log(`warn:${line}`);
   }
+
+  const b2Err = await verifyB2S3Credentials();
+  if (b2Err !== null) {
+    fail(`B2 S3 credentials check failed:\n  • ${b2Err}`);
+  }
+  console.log('B2 S3 credentials OK');
 
   const turboApi =
     (await store.getOptional(DopplerSecretKey.turboApi))?.readSecretValue() ??

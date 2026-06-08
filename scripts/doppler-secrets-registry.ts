@@ -66,13 +66,13 @@ export const DOPPLER_SECRET_REGISTRY: readonly DopplerSecretDefinition[] = [
     key: DopplerSecretKey.b2S3AccessKeyId,
     required: true,
     usedBy: ['worker'],
-    hint: 'B2 application key ID',
+    hint: 'B2 application key ID for the S3-compatible API (starts with 004)',
   },
   {
     key: DopplerSecretKey.b2S3SecretAccessKey,
     required: true,
     usedBy: ['worker'],
-    hint: 'B2 application key secret',
+    hint: 'B2 application key secret (shown once at key creation; starts with K)',
   },
   {
     key: DopplerSecretKey.b2Bucket,
