@@ -32,6 +32,13 @@ Use these values directly — do not ask me for the project or config names.
   - `vault run -- <command>` → injects the secret's fields as env vars, then
     runs `<command>`
   - All other `vault` subcommands pass through to the real binary
+- **GitHub Actions OIDC is already configured** on the store, so CI needs no
+  stored token. Use these exact coordinates:
+  - Auth mount / method: `jwt` (JWT, trusts GitHub's OIDC issuer)
+  - Role: `github-actions`
+  - Policy: `ci-read` (read-only on `secret/personal/*`)
+  - Bound audience: `https://secret-store.chrisvouga.dev`
+  - Allowed repos: `crvouga/*` (any branch); tokens are short-lived (15m / 30m max)
 
 ## Doppler → this setup mapping
 
@@ -124,12 +131,14 @@ the app sees) must be unchanged. A repo-wide search for `doppler` / `DOPPLER`
            secret/data/personal/prd DATABASE_URL   | DATABASE_URL
    ```
 
-   This repo must be allowed by the JWT role's bound claims. If `vault-action`
-   fails with a permission/role error, tell me to authorize it from the
-   `secret-store` repo (one-time, per repo or via an owner-wide glob):
+   Any repo under `crvouga/*` is already allowed by the role's bound claims, so
+   no extra setup should be needed. If `vault-action` fails with an audience
+   error, add `jwtGithubAudience: https://secret-store.chrisvouga.dev` to the
+   step. If it fails with a role/permission error (e.g. a repo outside
+   `crvouga/*`), tell me to authorize it from the `secret-store` repo:
 
    ```bash
-   ./scripts/setup-oidc-auth.sh --repo chrisvouga/<this-repo>
+   ./scripts/setup-oidc-auth.sh --repo crvouga/<this-repo>
    ```
 
    Never hardcode tokens or add a `VAULT_TOKEN`/`DOPPLER_TOKEN` CI secret.
