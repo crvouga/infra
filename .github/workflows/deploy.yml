@@ -32,7 +32,6 @@ jobs:
 
           FLY_HOST="${FLY_APP}.fly.dev"
           CF_ZONE_NAME="${CUSTOM_DOMAIN#*.}"
-          CF_RECORD_NAME="${CUSTOM_DOMAIN%%.${CF_ZONE_NAME}}"
 
           cf_api() {
             local method="$1"
@@ -64,6 +63,16 @@ jobs:
             printf '%s' "$body"
           }
 
+          normalize_dns_target() {
+            printf '%s' "$1" | sed 's/\.$//'
+          }
+
+          cname_targets_match() {
+            local existing="$1"
+            local desired="$2"
+            [ "$(normalize_dns_target "$existing")" = "$(normalize_dns_target "$desired")" ]
+          }
+
           echo "==> Verifying Cloudflare API token..."
           VERIFY="$(cf_api GET "https://api.cloudflare.com/client/v4/user/tokens/verify")"
           if ! echo "$VERIFY" | jq -e '.success == true' >/dev/null; then
@@ -83,32 +92,69 @@ jobs:
           fi
           echo "Found zone ID: ${CF_ZONE_ID}"
 
-          EXISTING="$(cf_api GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?type=CNAME&name=${CF_RECORD_NAME}")"
-
-          RECORD_ID="$(echo "$EXISTING" | jq -r --arg name "${CF_RECORD_NAME}" --arg fqdn "${CUSTOM_DOMAIN}" \
-            '.result[] | select(.name == $name or .name == $fqdn) | .id' | head -n 1)"
+          echo "==> Ensuring CNAME ${CUSTOM_DOMAIN} -> ${FLY_HOST}..."
+          EXISTING="$(cf_api GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CUSTOM_DOMAIN}")"
+          RECORD_ID="$(echo "$EXISTING" | jq -r '.result[0].id // empty')"
+          RECORD_TYPE="$(echo "$EXISTING" | jq -r '.result[0].type // empty')"
+          RECORD_CONTENT="$(echo "$EXISTING" | jq -r '.result[0].content // empty')"
 
           if [ -n "$RECORD_ID" ] && [ "$RECORD_ID" != "null" ]; then
-            echo "CNAME record already exists for ${CUSTOM_DOMAIN} (id: ${RECORD_ID})"
+            if [ "$RECORD_TYPE" = "CNAME" ]; then
+              if cname_targets_match "$RECORD_CONTENT" "$FLY_HOST"; then
+                echo "CNAME already exists and points to ${FLY_HOST} (id: ${RECORD_ID})"
+                exit 0
+              fi
+              echo "Updating CNAME (id: ${RECORD_ID}) to point to ${FLY_HOST}..."
+              RESPONSE="$(cf_api PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" "{
+                \"type\": \"CNAME\",
+                \"name\": \"${CUSTOM_DOMAIN}\",
+                \"content\": \"${FLY_HOST}\",
+                \"proxied\": false,
+                \"ttl\": 1
+              }")"
+              if echo "$RESPONSE" | jq -e '.success == true' >/dev/null; then
+                echo "Updated CNAME record for ${CUSTOM_DOMAIN}"
+                exit 0
+              fi
+              echo "Failed to update DNS record:" >&2
+              echo "$RESPONSE" | jq . >&2
+              exit 1
+            fi
+            echo "DNS record already exists for ${CUSTOM_DOMAIN} (type: ${RECORD_TYPE}, id: ${RECORD_ID})"
+            echo "Leaving unchanged — idempotent skip."
             exit 0
           fi
 
-          echo "Creating CNAME ${CF_RECORD_NAME} -> ${FLY_HOST}..."
-          RESPONSE="$(cf_api POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" "{
-            \"type\": \"CNAME\",
-            \"name\": \"${CF_RECORD_NAME}\",
-            \"content\": \"${FLY_HOST}\",
-            \"proxied\": false,
-            \"ttl\": 1
-          }")"
+          echo "Creating CNAME ${CUSTOM_DOMAIN} -> ${FLY_HOST}..."
+          CREATE_RESPONSE="$(curl -sS -w "\n__HTTP__:%{http_code}" -X POST \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+            --data "{
+              \"type\": \"CNAME\",
+              \"name\": \"${CUSTOM_DOMAIN}\",
+              \"content\": \"${FLY_HOST}\",
+              \"proxied\": false,
+              \"ttl\": 1
+            }")"
+          CREATE_HTTP="${CREATE_RESPONSE##*__HTTP__:}"
+          CREATE_BODY="${CREATE_RESPONSE%__HTTP__:*}"
 
-          if ! echo "$RESPONSE" | jq -e '.success == true' >/dev/null; then
-            echo "Failed to create DNS record:" >&2
-            echo "$RESPONSE" | jq . >&2
-            exit 1
+          if [ "$CREATE_HTTP" -ge 200 ] && [ "$CREATE_HTTP" -lt 300 ] \
+            && echo "$CREATE_BODY" | jq -e '.success == true' >/dev/null; then
+            echo "Created CNAME record for ${CUSTOM_DOMAIN}"
+            exit 0
           fi
 
-          echo "Created CNAME record for ${CUSTOM_DOMAIN}"
+          if [ "$CREATE_HTTP" -eq 400 ] \
+            && echo "$CREATE_BODY" | jq -e '.errors[]? | select(.code == 81053)' >/dev/null 2>&1; then
+            echo "CNAME record already exists for ${CUSTOM_DOMAIN} (Cloudflare 81053) — idempotent skip."
+            exit 0
+          fi
+
+          echo "ERROR: Failed to create DNS record (HTTP ${CREATE_HTTP})" >&2
+          echo "$CREATE_BODY" | jq . >&2 2>/dev/null || echo "$CREATE_BODY" >&2
+          exit 1
 
   migrate-db:
     name: Run DB Migrations
@@ -185,10 +231,16 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           set -euo pipefail
-          if flyctl certs list --app "${FLY_APP}" | grep -q "${CUSTOM_DOMAIN}"; then
+          if flyctl certs list --app "${FLY_APP}" 2>/dev/null | grep -Fq "${CUSTOM_DOMAIN}"; then
             echo "Certificate for ${CUSTOM_DOMAIN} already registered"
           else
-            flyctl certs add "${CUSTOM_DOMAIN}" --app "${FLY_APP}"
+            if ! flyctl certs add "${CUSTOM_DOMAIN}" --app "${FLY_APP}" 2>&1; then
+              if flyctl certs list --app "${FLY_APP}" 2>/dev/null | grep -Fq "${CUSTOM_DOMAIN}"; then
+                echo "Certificate for ${CUSTOM_DOMAIN} already registered (race/idempotent skip)"
+              else
+                exit 1
+              fi
+            fi
           fi
 
       - name: Wait for certificate to become ready
@@ -199,7 +251,7 @@ jobs:
           for i in $(seq 1 60); do
             STATUS="$(flyctl certs check "${CUSTOM_DOMAIN}" --app "${FLY_APP}" 2>&1 || true)"
             echo "$STATUS"
-            if echo "$STATUS" | grep -qi "ready"; then
+            if echo "$STATUS" | grep -Eiq 'ready|already.*ready|valid'; then
               echo "Certificate is ready"
               exit 0
             fi

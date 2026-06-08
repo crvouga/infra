@@ -65,7 +65,7 @@ for i in $(seq 1 "$UNSEAL_THRESHOLD"); do
     exit 1
   fi
   echo "    Unseal key ${i}/${UNSEAL_THRESHOLD}..."
-  VAULT_ADDR="$VAULT_ADDR" "$VAULT_REAL_BIN" operator unseal "$KEY" >/dev/null
+  vault_cmd operator unseal "$KEY" >/dev/null || true
 done
 
 SEALED="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" | jq -r '.sealed // true')"

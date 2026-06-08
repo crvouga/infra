@@ -53,6 +53,10 @@ if [ "$VALUE" != "pong" ]; then
 fi
 
 echo "==> Deleting test secret..."
-vault_cmd kv metadata delete "${SECRET_PATH}"
+if vault_cmd kv metadata get "${SECRET_PATH}" >/dev/null 2>&1; then
+  vault_cmd kv metadata delete "${SECRET_PATH}"
+else
+  echo "Test secret already absent — skip delete"
+fi
 
 echo "✓ smoke test passed"
