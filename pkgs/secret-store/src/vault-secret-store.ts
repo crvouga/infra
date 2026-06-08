@@ -128,6 +128,13 @@ async function readVaultKvBody(
       404
     );
   }
+  // HTTP 530 = node removed from HA cluster. Retry a few times as this can be transient.
+  if (response.status === 530) {
+    throw new SecretStoreRequestError(
+      `Vault KV read failed: node removed from HA cluster (HTTP 530). Check Vault cluster health and ensure the client is routed to an active/healthy standby node.`,
+      530
+    );
+  }
   if (!response.ok) {
     throw new SecretStoreRequestError(
       `Vault KV read failed: HTTP ${response.status}`,
@@ -349,14 +356,16 @@ export class VaultSecretStore implements SecretStore {
           `Vault KV read failed (network): ${msg}`
         );
       }
-      if (response.status !== 429 || attempt >= this.rateLimitRetries) {
+      // HTTP 530 (node removed from HA cluster) is potentially transient - retry
+      if ((response.status !== 429 && response.status !== 530) || attempt >= this.rateLimitRetries) {
         return response;
       }
       const retryAfterMs = parseRetryAfterMs(
         response.headers.get('Retry-After')
       );
+      // For HTTP 530, use a fixed backoff (no Retry-After header expected)
       const backoffMs =
-        retryAfterMs ?? Math.min(2 ** attempt * 250, RATE_LIMIT_BACKOFF_CAP_MS);
+        retryAfterMs ?? (response.status === 530 ? 2_000 : Math.min(2 ** attempt * 250, RATE_LIMIT_BACKOFF_CAP_MS));
       attempt += 1;
       await this.sleep(backoffMs);
     }
