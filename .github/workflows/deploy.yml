@@ -193,19 +193,19 @@ jobs:
 
       - name: Run smoke test
         env:
-          BAO_ADDR: https://${{ env.CUSTOM_DOMAIN }}
-          BAO_TOKEN: ${{ secrets.BAO_TOKEN }}
+          VAULT_ADDR: https://${{ env.CUSTOM_DOMAIN }}
+          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${BAO_TOKEN}" ]; then
-            echo "BAO_TOKEN not configured — skipping smoke test (add after running init.sh)"
+          if [ -z "${VAULT_TOKEN}" ]; then
+            echo "VAULT_TOKEN not configured — skipping smoke test (add after running init.sh)"
             exit 0
           fi
 
           VERSION="$(curl -sf https://api.github.com/repos/openbao/openbao/releases/latest | jq -r .tag_name)"
-          curl -fsSL "https://github.com/openbao/openbao/releases/download/${VERSION}/bao_${VERSION#v}_linux_amd64.tar.gz" -o bao.tar.gz
-          tar -xzf bao.tar.gz
-          sudo install -m 755 bao /usr/local/bin/bao
+          curl -fsSL "https://github.com/openbao/openbao/releases/download/${VERSION}/bao_${VERSION#v}_linux_amd64.tar.gz" -o vault.tar.gz
+          tar -xzf vault.tar.gz
+          sudo install -m 755 bao /usr/local/bin/vault
 
           chmod +x scripts/smoke-test.sh
           ./scripts/smoke-test.sh

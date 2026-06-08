@@ -3,7 +3,7 @@ set -euo pipefail
 
 FLY_APP="secret-store-chrisvouga"
 SKIP_FLY=false
-SKIP_BAO=false
+SKIP_VAULT=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -23,7 +23,7 @@ Fetch deploy pipeline secrets from authenticated CLIs and seed GitHub Actions
 
 Options:
   --skip-fly   Only set GitHub secrets (skip fly secrets set)
-  --skip-bao   Do not fetch or set BAO_TOKEN
+  --skip-vault   Do not fetch or set VAULT_TOKEN
   -h, --help   Show this help
 
 Log in first:
@@ -37,10 +37,10 @@ Cloudflare requires a dashboard API token (Wrangler OAuth does not work):
 
 Optional overrides (env vars, ${ENV_FILE}, or ${ENV_SECRETS_FILE}):
   NEON_PROJECT_ID, FLY_API_TOKEN, CF_API_TOKEN, CLOUDFLARE_API_TOKEN,
-  DB_CONNECTION_URI, BAO_TOKEN
+  DB_CONNECTION_URI, VAULT_TOKEN
 
 Required GitHub secrets: FLY_API_TOKEN, CF_API_TOKEN, DB_CONNECTION_URI
-Optional GitHub secret:  BAO_TOKEN (from init-output.json after init.sh)
+Optional GitHub secret:  VAULT_TOKEN (from init-output.json after init.sh)
 EOF
 }
 
@@ -229,13 +229,13 @@ fetch_db_connection_uri() {
   record_source "DB_CONNECTION_URI (neon connection-string)"
 }
 
-fetch_bao_token() {
-  if [ "$SKIP_BAO" = true ]; then
+fetch_vault_token() {
+  if [ "$SKIP_VAULT" = true ]; then
     return 0
   fi
 
-  if [ -n "${BAO_TOKEN:-}" ]; then
-    record_source "BAO_TOKEN (environment override)"
+  if [ -n "${VAULT_TOKEN:-}" ]; then
+    record_source "VAULT_TOKEN (environment override)"
     return 0
   fi
 
@@ -244,12 +244,12 @@ fetch_bao_token() {
   fi
 
   require_cmd jq "Install jq: https://jqlang.github.io/jq/"
-  echo "==> Fetching BAO_TOKEN from init-output.json"
-  BAO_TOKEN="$(jq -r '.root_token // empty' "$INIT_OUTPUT_FILE")"
-  if [ -n "$BAO_TOKEN" ] && [ "$BAO_TOKEN" != "null" ]; then
-    record_source "BAO_TOKEN (init-output.json)"
+  echo "==> Fetching VAULT_TOKEN from init-output.json"
+  VAULT_TOKEN="$(jq -r '.root_token // empty' "$INIT_OUTPUT_FILE")"
+  if [ -n "$VAULT_TOKEN" ] && [ "$VAULT_TOKEN" != "null" ]; then
+    record_source "VAULT_TOKEN (init-output.json)"
   else
-    BAO_TOKEN=""
+    VAULT_TOKEN=""
   fi
 }
 
@@ -271,7 +271,7 @@ fly_app_exists() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --skip-fly) SKIP_FLY=true ;;
-    --skip-bao) SKIP_BAO=true ;;
+    --skip-vault) SKIP_VAULT=true ;;
     -h|--help)
       usage
       exit 0
@@ -308,7 +308,7 @@ fetch_fly_api_token
 fetch_cf_api_token
 verify_cf_api_token
 fetch_db_connection_uri
-fetch_bao_token
+fetch_vault_token
 
 assert_non_empty FLY_API_TOKEN "$FLY_API_TOKEN"
 assert_non_empty CF_API_TOKEN "$CF_API_TOKEN"
@@ -322,9 +322,9 @@ gh secret set DB_CONNECTION_URI --body "$DB_CONNECTION_URI" --repo "$GITHUB_REPO
 
 GITHUB_SET=(FLY_API_TOKEN CF_API_TOKEN DB_CONNECTION_URI)
 
-if [ -n "${BAO_TOKEN:-}" ]; then
-  gh secret set BAO_TOKEN --body "$BAO_TOKEN" --repo "$GITHUB_REPO"
-  GITHUB_SET+=(BAO_TOKEN)
+if [ -n "${VAULT_TOKEN:-}" ]; then
+  gh secret set VAULT_TOKEN --body "$VAULT_TOKEN" --repo "$GITHUB_REPO"
+  GITHUB_SET+=(VAULT_TOKEN)
 fi
 
 FLY_SET=()
@@ -371,7 +371,7 @@ else
   echo "Fly secrets: (none set)"
 fi
 echo ""
-if [ -z "${BAO_TOKEN:-}" ]; then
-  echo "Note: BAO_TOKEN was not set. Smoke tests will skip until you run init.sh"
+if [ -z "${VAULT_TOKEN:-}" ]; then
+  echo "Note: VAULT_TOKEN was not set. Smoke tests will skip until you run init.sh"
   echo "      and re-run: ./scripts/seed-github-secrets.sh"
 fi

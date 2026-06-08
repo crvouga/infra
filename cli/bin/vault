@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# secret-store-vault-wrapper
+set -euo pipefail
+
+if [ -z "${SECRET_STORE_CLI_ROOT:-}" ]; then
+  WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  SECRET_STORE_CLI_ROOT="$(cd "${WRAPPER_DIR}/.." && pwd)"
+fi
+
+# shellcheck source=../lib/vault-auth.sh
+source "${SECRET_STORE_CLI_ROOT}/lib/vault-auth.sh"
+# shellcheck source=../lib/config.sh
+source "${SECRET_STORE_CLI_ROOT}/lib/config.sh"
+# shellcheck source=../lib/run.sh
+source "${SECRET_STORE_CLI_ROOT}/lib/run.sh"
+
+subcommand="${1:-}"
+
+case "$subcommand" in
+  run)
+    shift
+    vault_run "$@" || exit $?
+    ;;
+  setup)
+    shift
+    vault_setup "$@" || exit $?
+    ;;
+  "")
+    if ! resolve_vault_bin; then
+      echo "ERROR: Vault CLI binary not found." >&2
+      echo "       Install Vault or OpenBao CLI: https://openbao.org/docs/install/" >&2
+      echo "       Or run: ./scripts/install-cli.sh" >&2
+      exit 1
+    fi
+    exec "$VAULT_REAL_BIN"
+    ;;
+  -h|--help|help)
+    cat <<EOF
+secret-store vault wrapper — Doppler-style secret injection for self-hosted OpenBao.
+
+Usage:
+  vault run [OPTIONS] -- <command> [args...]   Run command with secrets injected
+  vault setup [OPTIONS]                        Write .vault.yaml in current directory
+  vault <command> ...                          Pass through to Vault CLI
+
+Run 'vault run --help' or 'vault setup --help' for details.
+EOF
+    ;;
+  *)
+    if ! resolve_vault_bin; then
+      echo "ERROR: Vault CLI binary not found." >&2
+      echo "       Install Vault or OpenBao CLI: https://openbao.org/docs/install/" >&2
+      echo "       Or run: ./scripts/install-cli.sh" >&2
+      exit 1
+    fi
+    exec "$VAULT_REAL_BIN" "$@"
+    ;;
+esac

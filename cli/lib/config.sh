@@ -1,10 +1,10 @@
-# .bao.yaml project config helpers (Doppler-style).
+# .vault.yaml project config helpers (Doppler-style).
 # shellcheck shell=bash
 
-BAO_CONFIG_FILE=".bao.yaml"
-BAO_DEFAULT_MOUNT="${BAO_DEFAULT_MOUNT:-doppler}"
+VAULT_CONFIG_FILE=".vault.yaml"
+VAULT_DEFAULT_MOUNT="${VAULT_DEFAULT_MOUNT:-doppler}"
 
-read_bao_yaml_value() {
+read_vault_yaml_value() {
   local file="$1"
   local key="$2"
   grep -E "^${key}:[[:space:]]*" "$file" 2>/dev/null \
@@ -13,13 +13,13 @@ read_bao_yaml_value() {
     | sed -E 's/^["'\''](.*)["'\'']$/\1/'
 }
 
-find_bao_config_file() {
+find_vault_config_file() {
   local dir="$PWD"
   local git_root=""
 
   while [ "$dir" != "/" ]; do
-    if [ -f "${dir}/${BAO_CONFIG_FILE}" ]; then
-      BAO_CONFIG_PATH="${dir}/${BAO_CONFIG_FILE}"
+    if [ -f "${dir}/${VAULT_CONFIG_FILE}" ]; then
+      VAULT_CONFIG_PATH="${dir}/${VAULT_CONFIG_FILE}"
       return 0
     fi
     if [ -d "${dir}/.git" ]; then
@@ -32,8 +32,8 @@ find_bao_config_file() {
   if [ -n "$git_root" ]; then
     dir="$git_root"
     while [ "$dir" != "/" ]; do
-      if [ -f "${dir}/${BAO_CONFIG_FILE}" ]; then
-        BAO_CONFIG_PATH="${dir}/${BAO_CONFIG_FILE}"
+      if [ -f "${dir}/${VAULT_CONFIG_FILE}" ]; then
+        VAULT_CONFIG_PATH="${dir}/${VAULT_CONFIG_FILE}"
         return 0
       fi
       dir="$(dirname "$dir")"
@@ -43,20 +43,20 @@ find_bao_config_file() {
   return 1
 }
 
-load_bao_config_defaults() {
-  BAO_CONFIG_ADDR=""
-  BAO_CONFIG_MOUNT=""
-  BAO_CONFIG_PROJECT=""
-  BAO_CONFIG_CONFIG=""
+load_vault_config_defaults() {
+  VAULT_CONFIG_ADDR=""
+  VAULT_CONFIG_MOUNT=""
+  VAULT_CONFIG_PROJECT=""
+  VAULT_CONFIG_CONFIG=""
 
-  if ! find_bao_config_file; then
+  if ! find_vault_config_file; then
     return 1
   fi
 
-  BAO_CONFIG_ADDR="$(read_bao_yaml_value "$BAO_CONFIG_PATH" addr)"
-  BAO_CONFIG_MOUNT="$(read_bao_yaml_value "$BAO_CONFIG_PATH" mount)"
-  BAO_CONFIG_PROJECT="$(read_bao_yaml_value "$BAO_CONFIG_PATH" project)"
-  BAO_CONFIG_CONFIG="$(read_bao_yaml_value "$BAO_CONFIG_PATH" config)"
+  VAULT_CONFIG_ADDR="$(read_vault_yaml_value "$VAULT_CONFIG_PATH" addr)"
+  VAULT_CONFIG_MOUNT="$(read_vault_yaml_value "$VAULT_CONFIG_PATH" mount)"
+  VAULT_CONFIG_PROJECT="$(read_vault_yaml_value "$VAULT_CONFIG_PATH" project)"
+  VAULT_CONFIG_CONFIG="$(read_vault_yaml_value "$VAULT_CONFIG_PATH" config)"
   return 0
 }
 
@@ -74,28 +74,28 @@ resolve_secret_path() {
   fi
 
   local mount project config
-  mount="${cli_mount:-${BAO_MOUNT:-}}"
-  project="${cli_project:-${BAO_PROJECT:-}}"
-  config="${cli_config:-${BAO_CONFIG:-}}"
+  mount="${cli_mount:-${VAULT_MOUNT:-}}"
+  project="${cli_project:-${VAULT_PROJECT:-}}"
+  config="${cli_config:-${VAULT_CONFIG:-}}"
 
-  if load_bao_config_defaults; then
-    mount="${mount:-$BAO_CONFIG_MOUNT}"
-    project="${project:-$BAO_CONFIG_PROJECT}"
-    config="${config:-$BAO_CONFIG_CONFIG}"
-    if [ -z "${BAO_ADDR:-}" ] && [ -n "$BAO_CONFIG_ADDR" ]; then
-      BAO_ADDR="$BAO_CONFIG_ADDR"
+  if load_vault_config_defaults; then
+    mount="${mount:-$VAULT_CONFIG_MOUNT}"
+    project="${project:-$VAULT_CONFIG_PROJECT}"
+    config="${config:-$VAULT_CONFIG_CONFIG}"
+    if [ -z "${VAULT_ADDR:-}" ] && [ -n "$VAULT_CONFIG_ADDR" ]; then
+      VAULT_ADDR="$VAULT_CONFIG_ADDR"
     fi
   fi
 
-  mount="${mount:-$BAO_DEFAULT_MOUNT}"
+  mount="${mount:-$VAULT_DEFAULT_MOUNT}"
   mount="${mount#/}"
   mount="${mount%/}"
 
   if [ -z "$project" ] || [ -z "$config" ]; then
     echo "ERROR: Could not resolve secret path." >&2
     echo "" >&2
-    echo "Provide --project and --config, set BAO_PROJECT/BAO_CONFIG," >&2
-    echo "or run: bao setup --project <name> --config <name>" >&2
+    echo "Provide --project and --config, set VAULT_PROJECT/VAULT_CONFIG," >&2
+    echo "or run: vault setup --project <name> --config <name>" >&2
     return 1
   fi
 
@@ -103,12 +103,12 @@ resolve_secret_path() {
   return 0
 }
 
-write_bao_config() {
-  local addr="${1:-$BAO_DEFAULT_ADDR}"
-  local mount="${2:-$BAO_DEFAULT_MOUNT}"
+write_vault_config() {
+  local addr="${1:-$VAULT_DEFAULT_ADDR}"
+  local mount="${2:-$VAULT_DEFAULT_MOUNT}"
   local project="$3"
   local config="$4"
-  local output="${5:-${BAO_CONFIG_FILE}}"
+  local output="${5:-${VAULT_CONFIG_FILE}}"
 
   if [ -z "$project" ] || [ -z "$config" ]; then
     echo "ERROR: --project and --config are required for setup." >&2

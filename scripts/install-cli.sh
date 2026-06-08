@@ -7,26 +7,26 @@ CLI_SRC="${REPO_ROOT}/cli"
 INSTALL_ROOT="${SECRET_STORE_INSTALL_ROOT:-${HOME}/.local/share/secret-store}"
 INSTALL_CLI="${INSTALL_ROOT}/cli"
 INSTALL_BIN="${HOME}/.local/bin"
-WRAPPER_MARKER="secret-store-bao-wrapper"
+WRAPPER_MARKER="secret-store-vault-wrapper"
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Install the secret-store bao CLI wrapper globally.
+Install the secret-store vault CLI wrapper globally.
 
 The wrapper adds Doppler-style commands:
-  bao run -- <command>     Inject secrets from OpenBao as env vars
-  bao setup                Write .bao.yaml in your project
+  vault run -- <command>     Inject secrets from Vault as env vars
+  vault setup                Write .vault.yaml in your project
 
-All other bao subcommands pass through to the real OpenBao binary.
+All other vault subcommands pass through to the real Vault/OpenBao binary.
 
 Options:
   --prefix PATH   Install root (default: ~/.local/share/secret-store)
   -h, --help      Show this help
 
 Requires:
-  OpenBao CLI (openbao) installed separately: https://openbao.org/docs/install/
+  Vault or OpenBao CLI installed separately: https://openbao.org/docs/install/
   ~/.local/bin on your PATH
 EOF
 }
@@ -61,27 +61,34 @@ echo "==> Installing CLI library to ${INSTALL_CLI}..."
 rm -rf "${INSTALL_CLI:?}/"*
 cp -R "${CLI_SRC}/bin" "${CLI_SRC}/lib" "$INSTALL_CLI/"
 
-echo "==> Installing wrapper to ${INSTALL_BIN}/bao..."
-existing_bao="${INSTALL_BIN}/bao"
-if [ -f "$existing_bao" ] && ! grep -q "$WRAPPER_MARKER" "$existing_bao" 2>/dev/null; then
-  if [ ! -f "${INSTALL_BIN}/openbao" ]; then
-    echo "==> Preserving existing bao as ${INSTALL_BIN}/openbao"
-    mv "$existing_bao" "${INSTALL_BIN}/openbao"
+# Remove legacy bao wrapper if present
+if [ -f "${INSTALL_BIN}/bao" ] && grep -q "secret-store-bao-wrapper" "${INSTALL_BIN}/bao" 2>/dev/null; then
+  echo "==> Removing legacy bao wrapper"
+  rm -f "${INSTALL_BIN}/bao"
+fi
+
+echo "==> Installing wrapper to ${INSTALL_BIN}/vault..."
+existing_vault="${INSTALL_BIN}/vault"
+if [ -f "$existing_vault" ] && ! grep -q "$WRAPPER_MARKER" "$existing_vault" 2>/dev/null; then
+  if [ ! -f "${INSTALL_BIN}/vault-real" ]; then
+    echo "==> Preserving existing vault as ${INSTALL_BIN}/vault-real"
+    mv "$existing_vault" "${INSTALL_BIN}/vault-real"
   else
-    echo "WARNING: ${INSTALL_BIN}/openbao already exists — leaving existing bao in place." >&2
-    echo "         Set BAO_REAL_BIN if the wrapper cannot find OpenBao." >&2
+    echo "WARNING: ${INSTALL_BIN}/vault-real already exists — leaving existing vault in place." >&2
+    echo "         Set VAULT_REAL_BIN if the wrapper cannot find the real binary." >&2
   fi
 fi
 
-cp "${CLI_SRC}/bin/bao" "${INSTALL_BIN}/bao"
-chmod +x "${INSTALL_BIN}/bao" "${INSTALL_CLI}/bin/bao"
+cp "${CLI_SRC}/bin/vault" "${INSTALL_BIN}/vault"
+chmod +x "${INSTALL_BIN}/vault" "${INSTALL_CLI}/bin/vault"
 
-if ! command -v openbao >/dev/null 2>&1 \
-  && ! command -v bao-real >/dev/null 2>&1 \
-  && [ ! -x "${INSTALL_BIN}/openbao" ]; then
+if ! command -v vault-real >/dev/null 2>&1 \
+  && ! command -v bao >/dev/null 2>&1 \
+  && ! command -v openbao >/dev/null 2>&1 \
+  && [ ! -x "${INSTALL_BIN}/vault-real" ]; then
   echo ""
-  echo "WARNING: OpenBao binary not found on PATH." >&2
-  echo "         Install OpenBao before using bao run:" >&2
+  echo "WARNING: Vault/OpenBao binary not found on PATH." >&2
+  echo "         Install before using vault run:" >&2
   echo "         https://openbao.org/docs/install/" >&2
 fi
 
@@ -101,14 +108,14 @@ echo "Installed successfully"
 echo "================================================================================"
 echo ""
 echo "Next steps:"
-echo "  1. bao login hvs.your-root-token"
+echo "  1. vault login hvs.your-root-token"
 echo "     (or: ./scripts/create-dev-token.sh  for a scoped read token)"
 echo ""
 echo "  2. cd ~/your-app"
-echo "     bao setup --project myapp --config dev"
+echo "     vault setup --project myapp --config dev"
 echo ""
-echo "  3. bao run -- bun myserver.tsx"
+echo "  3. vault run -- bun myserver.tsx"
 echo ""
 echo "Verify:"
-echo "  bao run --help"
-echo "  bao kv list doppler/"
+echo "  vault run --help"
+echo "  vault kv list doppler/"

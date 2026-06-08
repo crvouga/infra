@@ -4,10 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# shellcheck source=../cli/lib/openbao-auth.sh
-source "${REPO_ROOT}/cli/lib/openbao-auth.sh"
+# shellcheck source=../cli/lib/vault-auth.sh
+source "${REPO_ROOT}/cli/lib/vault-auth.sh"
 
-BAO_ADDR="${BAO_ADDR:-$BAO_DEFAULT_ADDR}"
 MOUNT_PATH="doppler"
 DRY_RUN=false
 declare -a PROJECT_FILTER=()
@@ -35,21 +34,21 @@ Options:
   -h, --help       Show this help
 
 Environment:
-  BAO_ADDR         OpenBao API address (default: https://secret-store.chrisvouga.dev)
-  BAO_TOKEN        OpenBao token with write access (optional if resolved automatically)
+  VAULT_ADDR       Vault API address (default: https://secret-store.chrisvouga.dev)
+  VAULT_TOKEN      Vault token with write access (optional if resolved automatically)
   DOPPLER_TOKEN    Optional Doppler token (otherwise uses doppler login session)
 
-OpenBao auth is resolved automatically from, in order:
-  BAO_TOKEN / VAULT_TOKEN, bao login session, or init-output.json
+Vault auth is resolved automatically from, in order:
+  VAULT_TOKEN, vault login session, ~/.vault-token, or init-output.json
 
 Prerequisites:
   doppler CLI authenticated (doppler login) with workplace-wide read access
-  bao CLI, jq, curl
+  vault CLI, jq, curl
   OpenBao initialized and unsealed
 
 Examples:
-  ./scripts/bao-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --dry-run
-  ./scripts/bao-run.sh -- ./scripts/migrate-doppler-to-openbao.sh
+  ./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --dry-run
+  ./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh
   ./scripts/migrate-doppler-to-openbao.sh --project myapp --project other-app
 EOF
 }
@@ -130,16 +129,20 @@ while [ $# -gt 0 ]; do
 done
 
 require_cmd doppler "Install: https://docs.doppler.com/docs/install-cli"
-require_cmd bao "Install: https://openbao.org/docs/install/"
 require_cmd jq "Install jq: https://jqlang.github.io/jq/"
 require_cmd curl "Install curl"
 
-if ! export_bao_auth; then
+if ! export_vault_auth; then
   echo "" >&2
   echo "Authenticate with one of:" >&2
-  echo "  bao login -address=\"${BAO_ADDR}\"" >&2
-  echo "  export BAO_TOKEN='...'" >&2
+  echo "  vault login -address=\"${VAULT_ADDR}\"" >&2
+  echo "  export VAULT_TOKEN='...'" >&2
   echo "  ./scripts/init.sh   # then re-run this script" >&2
+  exit 1
+fi
+
+if ! resolve_vault_bin; then
+  echo "ERROR: vault CLI is required (https://openbao.org/docs/install/)" >&2
   exit 1
 fi
 
@@ -148,8 +151,8 @@ trap cleanup EXIT
 TMPFILE="$(mktemp)"
 chmod 600 "$TMPFILE"
 
-echo "==> Checking OpenBao health at ${BAO_ADDR}/v1/sys/health..."
-HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BAO_ADDR}/v1/sys/health")"
+echo "==> Checking OpenBao health at ${VAULT_ADDR}/v1/sys/health..."
+HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${VAULT_ADDR}/v1/sys/health")"
 if [ "$HTTP_CODE" != "200" ]; then
   echo "ERROR: Expected HTTP 200 from health check, got ${HTTP_CODE}" >&2
   echo "OpenBao may be sealed or uninitialized. Unseal before migrating." >&2
@@ -157,9 +160,9 @@ if [ "$HTTP_CODE" != "200" ]; then
 fi
 echo "Health check passed (HTTP 200)."
 
-echo "==> Verifying OpenBao authentication..."
-if ! bao token lookup >/dev/null 2>&1; then
-  echo "ERROR: BAO_TOKEN is invalid or expired" >&2
+echo "==> Verifying Vault authentication..."
+if ! vault_cmd token lookup >/dev/null 2>&1; then
+  echo "ERROR: VAULT_TOKEN is invalid or expired" >&2
   exit 1
 fi
 
@@ -174,8 +177,8 @@ if [ "$DRY_RUN" = true ]; then
   echo "==> Dry run mode — no secrets will be written to OpenBao"
 else
   echo "==> Ensuring KV v2 engine at ${MOUNT_PATH}/..."
-  if ! bao secrets list -format=json | jq -e --arg path "${MOUNT_PATH}/" 'has($path)' >/dev/null; then
-    bao secrets enable -path="${MOUNT_PATH}" kv-v2
+  if ! vault_cmd secrets list -format=json | jq -e --arg path "${MOUNT_PATH}/" 'has($path)' >/dev/null; then
+    vault_cmd secrets enable -path="${MOUNT_PATH}" kv-v2
   else
     echo "KV v2 already enabled at ${MOUNT_PATH}/"
   fi
@@ -224,7 +227,7 @@ for project in "${PROJECTS[@]}"; do
       echo "    ${secret_path}: would write ${key_count} key(s)"
     else
       echo "    ${secret_path}: writing ${key_count} key(s)..."
-      bao kv put "${secret_path}" @"$TMPFILE"
+      vault_cmd kv put "${secret_path}" @"$TMPFILE"
     fi
 
     CONFIGS_MIGRATED=$((CONFIGS_MIGRATED + 1))
@@ -252,5 +255,5 @@ if [ "$DRY_RUN" = true ]; then
   echo "Re-run without --dry-run to write secrets to OpenBao."
 else
   echo "Verify a secret:"
-  echo "  bao kv get -format=json ${MOUNT_PATH}/<project>/<config>"
+  echo "  vault kv get -format=json ${MOUNT_PATH}/<project>/<config>"
 fi

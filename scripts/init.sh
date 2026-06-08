@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BAO_ADDR="${BAO_ADDR:-https://secret-store.chrisvouga.dev}"
+VAULT_ADDR="${VAULT_ADDR:-https://secret-store.chrisvouga.dev}"
 INIT_OUTPUT="${INIT_OUTPUT:-init-output.json}"
 KEY_SHARES=5
 KEY_THRESHOLD=3
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# shellcheck source=../cli/lib/vault-auth.sh
+source "${REPO_ROOT}/cli/lib/vault-auth.sh"
 
 if [ -z "${DB_CONNECTION_URI:-}" ]; then
   echo "ERROR: DB_CONNECTION_URI is required" >&2
@@ -16,21 +22,19 @@ if ! command -v psql >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v bao >/dev/null 2>&1; then
-  echo "ERROR: bao CLI is required (https://openbao.org/docs/install/)" >&2
+if ! resolve_vault_bin; then
+  echo "ERROR: vault CLI is required (https://openbao.org/docs/install/)" >&2
   exit 1
 fi
 
-export BAO_ADDR
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export VAULT_ADDR
 
 echo "==> Running database migrations..."
 "${SCRIPT_DIR}/migrate.sh"
 
-echo "==> Waiting for OpenBao to become reachable at ${BAO_ADDR}..."
+echo "==> Waiting for OpenBao to become reachable at ${VAULT_ADDR}..."
 for i in $(seq 1 60); do
-  if curl -sf "${BAO_ADDR}/v1/sys/health" >/dev/null 2>&1; then
+  if curl -sf "${VAULT_ADDR}/v1/sys/health" >/dev/null 2>&1; then
     echo "OpenBao is reachable."
     break
   fi
@@ -42,15 +46,18 @@ for i in $(seq 1 60); do
 done
 
 echo "==> Checking initialization status..."
-INIT_STATUS="$(curl -sf "${BAO_ADDR}/v1/sys/init")"
+INIT_STATUS="$(curl -sf "${VAULT_ADDR}/v1/sys/init")"
 if echo "$INIT_STATUS" | jq -e '.initialized == true' >/dev/null; then
   echo "OpenBao is already initialized. Skipping init."
-  echo "If sealed, unseal manually with: bao operator unseal"
+  echo "If sealed, unseal manually with: vault operator unseal"
   exit 0
 fi
 
-echo "==> Initializing OpenBao (5 key shares, threshold 3)..."
-INIT_JSON="$(bao operator init -key-shares="${KEY_SHARES}" -key-threshold="${KEY_THRESHOLD}" -format=json)"
+echo "==> Initializing OpenBao (${KEY_SHARES} key shares, threshold ${KEY_THRESHOLD})..."
+INIT_JSON="$(
+  VAULT_ADDR="$VAULT_ADDR" "$VAULT_REAL_BIN" operator init \
+    -key-shares="${KEY_SHARES}" -key-threshold="${KEY_THRESHOLD}" -format=json
+)"
 
 printf '%s\n' "$INIT_JSON" > "$INIT_OUTPUT"
 chmod 600 "$INIT_OUTPUT"
@@ -71,10 +78,10 @@ printf '%s\n' "$INIT_JSON" | jq -r '.root_token'
 echo ""
 echo "================================================================================"
 
-echo "==> Unsealing OpenBao with 3 of 5 keys..."
-for i in 1 2 3; do
+echo "==> Unsealing OpenBao with ${KEY_THRESHOLD} of ${KEY_SHARES} keys..."
+for i in $(seq 1 "$KEY_THRESHOLD"); do
   KEY="$(printf '%s\n' "$INIT_JSON" | jq -r ".unseal_keys_b64[$((i - 1))]")"
-  bao operator unseal "$KEY"
+  VAULT_ADDR="$VAULT_ADDR" "$VAULT_REAL_BIN" operator unseal "$KEY"
 done
 
 echo ""
@@ -85,5 +92,5 @@ printf '%s\n' "$INIT_JSON" | jq -r '.root_token'
 echo ""
 echo "Next steps:"
 echo "  1. Store unseal keys and root token in a password manager or offline backup"
-echo "  2. Add BAO_TOKEN to GitHub repository secrets for CI smoke tests"
-echo "  3. Run: BAO_TOKEN=<root-token> ./scripts/smoke-test.sh"
+echo "  2. Add VAULT_TOKEN to GitHub repository secrets for CI smoke tests"
+echo "  3. Run: vault login <root-token>  or  ./scripts/vault-run.sh -- ./scripts/smoke-test.sh"

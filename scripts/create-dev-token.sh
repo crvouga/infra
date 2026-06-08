@@ -8,14 +8,14 @@ POLICY_NAME="dev-read"
 TOKEN_PERIOD="768h"
 DISPLAY_NAME="local-dev"
 
-# shellcheck source=../cli/lib/openbao-auth.sh
-source "${REPO_ROOT}/cli/lib/openbao-auth.sh"
+# shellcheck source=../cli/lib/vault-auth.sh
+source "${REPO_ROOT}/cli/lib/vault-auth.sh"
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Create a scoped read-only OpenBao token for local development (bao run).
+Create a scoped read-only Vault token for local development (vault run).
 
 Requires root token or a token with policy write + token create permissions.
 
@@ -24,7 +24,7 @@ Options:
   -h, --help          Show this help
 
 After running:
-  bao login <token>
+  vault login <token>
 EOF
 }
 
@@ -53,23 +53,21 @@ fi
 
 require_cmd jq "Install jq: https://jqlang.github.io/jq/"
 
-if ! export_bao_auth; then
+if ! export_vault_auth; then
   exit 1
 fi
 
-if ! resolve_bao_real_bin; then
-  echo "ERROR: OpenBao CLI binary not found." >&2
+if ! resolve_vault_bin; then
+  echo "ERROR: Vault CLI binary not found." >&2
   exit 1
 fi
 
 echo "==> Writing policy ${POLICY_NAME}..."
-BAO_ADDR="$BAO_ADDR" BAO_TOKEN="$BAO_TOKEN" \
-  "$BAO_REAL_BIN" policy write "$POLICY_NAME" "$POLICY_FILE"
+vault_cmd policy write "$POLICY_NAME" "$POLICY_FILE"
 
 echo "==> Creating token (period=${TOKEN_PERIOD}, policy=${POLICY_NAME})..."
 TOKEN_JSON="$(
-  BAO_ADDR="$BAO_ADDR" BAO_TOKEN="$BAO_TOKEN" \
-    "$BAO_REAL_BIN" token create \
+  vault_cmd token create \
     -policy="$POLICY_NAME" \
     -period="$TOKEN_PERIOD" \
     -display-name="$DISPLAY_NAME" \
@@ -84,8 +82,8 @@ echo "Dev token created (read-only on doppler/*)"
 echo "================================================================================"
 echo ""
 echo "Log in with:"
-echo "  bao login ${DEV_TOKEN}"
+echo "  vault login ${DEV_TOKEN}"
 echo ""
 echo "Then in any project:"
-echo "  bao setup --project myapp --config dev"
-echo "  bao run -- bun myserver.tsx"
+echo "  vault setup --project myapp --config dev"
+echo "  vault run -- bun myserver.tsx"

@@ -36,7 +36,7 @@ OpenBao is configured with `skip_create_table = true` so it never auto-creates t
 - [flyctl](https://fly.io/docs/hands-on/install-flyctl/) — `fly auth login`
 - [Neon CLI (`neonctl`)](https://neon.com/docs/reference/cli-install) — `neonctl auth`
 - **Cloudflare API token** — [create manually](https://dash.cloudflare.com/profile/api-tokens) with **Zone:DNS:Edit** for `chrisvouga.dev` (Wrangler OAuth cannot be used for DNS API)
-- [OpenBao CLI (`bao`)](https://openbao.org/docs/install/) — for init and smoke tests
+- [Vault CLI (`vault`)](https://openbao.org/docs/install/) — OpenBao-compatible; used for init, smoke tests, and local dev
 - [PostgreSQL client (`psql`)](https://www.postgresql.org/download/) — for migrations
 - [`jq`](https://jqlang.github.io/jq/) — for init and seed scripts
 
@@ -70,16 +70,16 @@ chmod +x scripts/seed-github-secrets.sh
 | `FLY_API_TOKEN` | Yes | `fly tokens create deploy` (or session token) |
 | `CF_API_TOKEN` | Yes | `CLOUDFLARE_API_TOKEN` — dashboard API token (not Wrangler) |
 | `DB_CONNECTION_URI` | Yes | `neon connection-string` |
-| `BAO_TOKEN` | After init | `init-output.json` (after `./scripts/init.sh`) |
+| `VAULT_TOKEN` | After init | `init-output.json` (after `./scripts/init.sh`) |
 
 Flags:
 
 - `--skip-fly` — only seed GitHub (if the Fly app is not created yet)
-- `--skip-bao` — do not fetch or set `BAO_TOKEN`
+- `--skip-vault` — do not fetch or set `VAULT_TOKEN`
 
 Optional overrides via [`.env`](.env) or [`.env.secrets`](.env.secrets.example) (`.env.secrets` takes precedence). Set `NEON_PROJECT_ID` if you have multiple Neon projects (or run `neon set-context` first).
 
-Re-run after `init.sh` to pick up `BAO_TOKEN` from `init-output.json` for CI smoke tests.
+Re-run after `init.sh` to pick up `VAULT_TOKEN` from `init-output.json` for CI smoke tests.
 
 The workflow derives everything else automatically:
 
@@ -94,7 +94,7 @@ Push to `main`. The workflow will:
 2. Run database migrations against Neon (`secret_store` schema)
 3. Deploy OpenBao to Fly.io
 4. Issue a TLS certificate for the custom domain
-5. Run smoke tests if `BAO_TOKEN` is set (skipped automatically until after step 4)
+5. Run smoke tests if `VAULT_TOKEN` is set (skipped automatically until after step 4)
 
 ### 4. Initialize OpenBao (one-time, local)
 
@@ -102,7 +102,7 @@ After the first deploy succeeds, run init locally:
 
 ```bash
 export DB_CONNECTION_URI="postgres://..."
-export BAO_ADDR="https://secret-store.chrisvouga.dev"
+export VAULT_ADDR="https://secret-store.chrisvouga.dev"
 
 chmod +x scripts/init.sh scripts/migrate.sh
 ./scripts/init.sh
@@ -118,7 +118,7 @@ This script will:
 
 **Save the unseal keys and root token from the output immediately.**
 
-Then re-run the seed script to push `BAO_TOKEN` to GitHub:
+Then re-run the seed script to push `VAULT_TOKEN` to GitHub:
 
 ```bash
 ./scripts/seed-github-secrets.sh
@@ -148,13 +148,13 @@ To add a new migration, create `migrations/003_description.sql` using fully qual
 OpenBao does **not** use auto-unseal. After a machine restart or redeploy, OpenBao will be **sealed** and must be unsealed manually:
 
 ```bash
-export BAO_ADDR="https://secret-store.chrisvouga.dev"
+export VAULT_ADDR="https://secret-store.chrisvouga.dev"
 
-bao operator unseal   # enter unseal key 1
-bao operator unseal   # enter unseal key 2
-bao operator unseal   # enter unseal key 3
+vault operator unseal   # enter unseal key 1
+vault operator unseal   # enter unseal key 2
+vault operator unseal   # enter unseal key 3
 
-bao status            # should show Sealed: false
+vault status            # should show Sealed: false
 ```
 
 You need 3 of the 5 unseal keys each time.
@@ -164,16 +164,19 @@ You need 3 of the 5 unseal keys each time.
 ### Locally
 
 ```bash
-export BAO_ADDR="https://secret-store.chrisvouga.dev"
-export BAO_TOKEN="your-root-token"
-
 chmod +x scripts/smoke-test.sh
 ./scripts/smoke-test.sh
 ```
 
+Auth is resolved automatically from `VAULT_TOKEN`, `vault login`, `~/.vault-token`, or `init-output.json`. Or use:
+
+```bash
+./scripts/vault-run.sh -- ./scripts/smoke-test.sh
+```
+
 ### In CI
 
-Smoke tests run automatically on every push to `main` when `BAO_TOKEN` is configured. If the secret is not set yet, the job skips with a message.
+Smoke tests run automatically on every push to `main` when `VAULT_TOKEN` is configured. If the secret is not set yet, the job skips with a message.
 
 ## Migrating from Doppler
 
@@ -185,21 +188,21 @@ Use [`scripts/migrate-doppler-to-openbao.sh`](scripts/migrate-doppler-to-openbao
 
 - [Doppler CLI](https://docs.doppler.com/docs/install-cli) authenticated (`doppler login`) with workplace-wide read access
 - OpenBao initialized and unsealed
-- OpenBao auth via `bao login`, `BAO_TOKEN`, or `init-output.json` (see [`scripts/bao-run.sh`](scripts/bao-run.sh))
+- Vault auth via `vault login`, `VAULT_TOKEN`, or `init-output.json` (see [`scripts/vault-run.sh`](scripts/vault-run.sh))
 
 ```bash
-export BAO_ADDR="https://secret-store.chrisvouga.dev"
+export VAULT_ADDR="https://secret-store.chrisvouga.dev"
 
-chmod +x scripts/bao-run.sh scripts/migrate-doppler-to-openbao.sh
+chmod +x scripts/vault-run.sh scripts/migrate-doppler-to-openbao.sh
 
 # Preview what would be migrated
-./scripts/bao-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --dry-run
+./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --dry-run
 
 # Migrate all projects and configs
-./scripts/bao-run.sh -- ./scripts/migrate-doppler-to-openbao.sh
+./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh
 
 # Limit to specific projects or use a custom mount
-./scripts/bao-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --project myapp --mount doppler
+./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --project myapp --mount doppler
 ```
 
 | Flag | Purpose |
@@ -211,42 +214,42 @@ chmod +x scripts/bao-run.sh scripts/migrate-doppler-to-openbao.sh
 Re-running the script is safe — KV v2 creates a new version for each write. Verify a migrated secret:
 
 ```bash
-bao kv get -format=json doppler/myapp/prd
+vault kv get -format=json doppler/myapp/prd
 ```
 
 ## Using secrets locally (Doppler-style)
 
-Install the global `bao` wrapper once, then use `bao run` in any project to inject secrets as environment variables.
+Install the global `vault` wrapper once, then use `vault run` in any project to inject secrets as environment variables.
 
-| Doppler | OpenBao (this setup) |
-|---------|----------------------|
-| `doppler login` | `bao login hvs.xxx` |
-| `doppler setup` | `bao setup --project X --config Y` |
-| `doppler run -- npm start` | `bao run -- npm start` |
-| `doppler.yaml` | `.bao.yaml` |
+| Doppler | This setup |
+|---------|------------|
+| `doppler login` | `vault login hvs.xxx` |
+| `doppler setup` | `vault setup --project X --config Y` |
+| `doppler run -- npm start` | `vault run -- npm start` |
+| `doppler.yaml` | `.vault.yaml` |
 
 ### 1. Install the CLI wrapper
 
-Requires [OpenBao CLI](https://openbao.org/docs/install/) (`openbao`) and [`jq`](https://jqlang.github.io/jq/) installed separately.
+Requires [Vault or OpenBao CLI](https://openbao.org/docs/install/) and [`jq`](https://jqlang.github.io/jq/) installed separately.
 
 ```bash
 chmod +x scripts/install-cli.sh
 ./scripts/install-cli.sh
 ```
 
-This installs a wrapper to `~/.local/bin/bao` that adds `run` and `setup` subcommands. All other commands pass through to the real OpenBao binary.
+This installs a wrapper to `~/.local/bin/vault` that adds `run` and `setup` subcommands. All other commands pass through to the real Vault/OpenBao binary.
 
-If you already had `bao` on PATH, the installer renames it to `openbao`.
+If you already had `vault` on PATH, the installer renames it to `vault-real`.
 
 ### 2. Authenticate
 
 ```bash
 # Root token (full access)
-bao login hvs.your-root-token
+vault login hvs.your-root-token
 
 # Or create a scoped read-only dev token (recommended for daily use)
 ./scripts/create-dev-token.sh
-bao login hvs.dev-token...
+vault login hvs.dev-token...
 ```
 
 ### 3. Configure a project
@@ -255,10 +258,10 @@ In any app repo:
 
 ```bash
 cd ~/my-app
-bao setup --project myapp --config dev
+vault setup --project myapp --config dev
 ```
 
-This writes [`.bao.yaml`](.bao.yaml.example) (like Doppler's `doppler.yaml`):
+This writes [`.vault.yaml`](.vault.yaml.example) (like Doppler's `doppler.yaml`):
 
 ```yaml
 addr: https://secret-store.chrisvouga.dev
@@ -270,9 +273,9 @@ config: dev
 ### 4. Run commands with secrets injected
 
 ```bash
-bao run -- bun myserver.tsx
-bao run --dry-run -- npm test    # preview env var names only
-bao run --project myapp --config prd -- npm start   # override .bao.yaml
+vault run -- bun myserver.tsx
+vault run --dry-run -- npm test    # preview env var names only
+vault run --project myapp --config prd -- npm start   # override .vault.yaml
 ```
 
 Secrets are read from `doppler/<project>/<config>` (KV v2). Each field becomes an environment variable.
@@ -304,8 +307,8 @@ This returns HTTP 200 even when OpenBao is sealed or uninitialized, so the proce
 ```
 secret-store/
 ├── .github/workflows/deploy.yml   # CI/CD pipeline
-├── cli/                           # Global bao wrapper (bao run / bao setup)
-│   ├── bin/bao
+├── cli/                           # Global vault wrapper (vault run / vault setup)
+│   ├── bin/vault
 │   └── lib/
 ├── config/
 │   ├── openbao.hcl                # OpenBao server config
@@ -314,13 +317,13 @@ secret-store/
 ├── scripts/
 │   ├── init.sh                         # First-time initialization
 │   ├── migrate.sh                      # Apply database migrations
-│   ├── install-cli.sh                  # Install global bao wrapper
+│   ├── install-cli.sh                  # Install global vault wrapper
 │   ├── create-dev-token.sh             # Create scoped local-dev token
-│   ├── bao-run.sh                      # Run a command with OpenBao API credentials
+│   ├── vault-run.sh                    # Run a command with Vault API credentials
 │   ├── migrate-doppler-to-openbao.sh   # Copy secrets from Doppler to OpenBao
 │   ├── seed-github-secrets.sh          # Auto-fetch + seed GitHub/Fly secrets
 │   └── smoke-test.sh                   # End-to-end verification
-├── .bao.yaml.example              # Per-project config template
+├── .vault.yaml.example            # Per-project config template
 ├── docker-entrypoint.sh           # Maps env vars + search_path for OpenBao
 ├── Dockerfile
 ├── fly.toml

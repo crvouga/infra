@@ -1,15 +1,15 @@
-# bao run — fetch KV secrets and inject as environment variables.
+# vault run — fetch KV secrets and inject as environment variables.
 # shellcheck shell=bash
 
-bao_run_usage() {
+vault_run_usage() {
   cat <<EOF
-Usage: bao run [OPTIONS] -- <command> [args...]
+Usage: vault run [OPTIONS] -- <command> [args...]
 
-Fetch secrets from OpenBao and run a command with them injected as env vars.
+Fetch secrets from Vault and run a command with them injected as env vars.
 
 Options:
   --path PATH       Full KV path (e.g. doppler/myapp/dev)
-  --mount PATH      KV mount (default: doppler, or from .bao.yaml)
+  --mount PATH      KV mount (default: doppler, or from .vault.yaml)
   --project NAME    Doppler-style project name
   --config NAME     Doppler-style config/environment name
   --dry-run         Print secret path and env var names only (no values)
@@ -17,18 +17,18 @@ Options:
 
 Config resolution (first match wins):
   1. CLI flags (--path, or --mount + --project + --config)
-  2. Environment: BAO_MOUNT, BAO_PROJECT, BAO_CONFIG
-  3. .bao.yaml in current directory or parent (up to git root)
+  2. Environment: VAULT_MOUNT, VAULT_PROJECT, VAULT_CONFIG
+  3. .vault.yaml in current directory or parent (up to git root)
 
 Examples:
-  bao setup --project myapp --config dev
-  bao run -- bun myserver.tsx
-  bao run --project myapp --config prd -- npm start
-  bao run --dry-run -- bun test
+  vault setup --project myapp --config dev
+  vault run -- bun myserver.tsx
+  vault run --project myapp --config prd -- npm start
+  vault run --dry-run -- bun test
 EOF
 }
 
-bao_run() {
+vault_run() {
   local cli_mount="" cli_project="" cli_config="" cli_path="" dry_run=false
   local -a cmd=()
 
@@ -55,7 +55,7 @@ bao_run() {
         shift
         ;;
       -h|--help)
-        bao_run_usage
+        vault_run_usage
         return 0
         ;;
       --)
@@ -65,7 +65,7 @@ bao_run() {
         ;;
       *)
         echo "ERROR: Unknown option: $1" >&2
-        bao_run_usage >&2
+        vault_run_usage >&2
         return 1
         ;;
     esac
@@ -73,20 +73,20 @@ bao_run() {
 
   if [ "${#cmd[@]}" -eq 0 ]; then
     echo "ERROR: No command specified. Use -- before the command." >&2
-    bao_run_usage >&2
+    vault_run_usage >&2
     return 1
   fi
 
   require_cmd jq "Install jq: https://jqlang.github.io/jq/"
 
-  if ! export_bao_auth; then
+  if ! export_vault_auth; then
     return 1
   fi
 
-  if ! resolve_bao_real_bin; then
-    echo "ERROR: OpenBao CLI binary not found." >&2
-    echo "       Install OpenBao and ensure 'openbao' is on PATH," >&2
-    echo "       or set BAO_REAL_BIN to the real binary path." >&2
+  if ! resolve_vault_bin; then
+    echo "ERROR: Vault CLI binary not found." >&2
+    echo "       Install Vault or OpenBao CLI and ensure it is on PATH," >&2
+    echo "       or set VAULT_REAL_BIN to the real binary path." >&2
     return 1
   fi
 
@@ -96,13 +96,13 @@ bao_run() {
 
   echo "==> Fetching secrets from ${SECRET_PATH}..."
 
-  local secret_json http_code
+  local secret_json
   secret_json="$(
-    BAO_ADDR="$BAO_ADDR" BAO_TOKEN="$BAO_TOKEN" \
-      "$BAO_REAL_BIN" kv get -format=json "$SECRET_PATH" 2>&1
+    VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" \
+      "$VAULT_REAL_BIN" kv get -format=json "$SECRET_PATH" 2>&1
   )" || {
     if echo "$secret_json" | grep -qi "sealed"; then
-      echo "ERROR: OpenBao is sealed. Unseal before running commands." >&2
+      echo "ERROR: Vault is sealed. Unseal before running commands." >&2
     elif echo "$secret_json" | grep -qi "permission denied\|403"; then
       echo "ERROR: Token lacks read access to ${SECRET_PATH}." >&2
       echo "       Run: ./scripts/create-dev-token.sh" >&2
@@ -138,25 +138,25 @@ bao_run() {
   exec "${cmd[@]}"
 }
 
-bao_setup_usage() {
+vault_setup_usage() {
   cat <<EOF
-Usage: bao setup [OPTIONS]
+Usage: vault setup [OPTIONS]
 
-Write a .bao.yaml config file in the current directory (Doppler-style setup).
+Write a .vault.yaml config file in the current directory (Doppler-style setup).
 
 Options:
   --project NAME   Project name (required)
   --config NAME    Config/environment name (required)
   --mount PATH     KV mount (default: doppler)
-  --addr URL       OpenBao address (default: https://secret-store.chrisvouga.dev)
+  --addr URL       Vault address (default: https://secret-store.chrisvouga.dev)
   -h, --help       Show this help
 
 Example:
-  bao setup --project myapp --config dev
+  vault setup --project myapp --config dev
 EOF
 }
 
-bao_setup() {
+vault_setup() {
   local project="" config="" mount="" addr=""
 
   while [ $# -gt 0 ]; do
@@ -178,20 +178,20 @@ bao_setup() {
         shift 2
         ;;
       -h|--help)
-        bao_setup_usage
+        vault_setup_usage
         return 0
         ;;
       *)
         echo "ERROR: Unknown option: $1" >&2
-        bao_setup_usage >&2
+        vault_setup_usage >&2
         return 1
         ;;
     esac
   done
 
-  write_bao_config \
-    "${addr:-${BAO_ADDR:-$BAO_DEFAULT_ADDR}}" \
-    "${mount:-$BAO_DEFAULT_MOUNT}" \
+  write_vault_config \
+    "${addr:-${VAULT_ADDR:-$VAULT_DEFAULT_ADDR}}" \
+    "${mount:-$VAULT_DEFAULT_MOUNT}" \
     "$project" \
     "$config"
 }
