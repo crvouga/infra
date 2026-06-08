@@ -209,13 +209,8 @@ jobs:
           UNSEAL_THRESHOLD: "3"
         run: |
           set -euo pipefail
-
-          VERSION="$(curl -sf https://api.github.com/repos/openbao/openbao/releases/latest | jq -r .tag_name)"
-          curl -fsSL "https://github.com/openbao/openbao/releases/download/${VERSION}/bao_${VERSION#v}_linux_amd64.tar.gz" -o vault.tar.gz
-          tar -xzf vault.tar.gz
-          sudo install -m 755 bao /usr/local/bin/vault
-
-          chmod +x scripts/unseal.sh
+          chmod +x scripts/install-vault-cli.sh scripts/unseal.sh
+          ./scripts/install-vault-cli.sh
           ./scripts/unseal.sh
 
   issue-tls:
@@ -281,10 +276,6 @@ jobs:
             exit 0
           fi
 
-          VERSION="$(curl -sf https://api.github.com/repos/openbao/openbao/releases/latest | jq -r .tag_name)"
-          curl -fsSL "https://github.com/openbao/openbao/releases/download/${VERSION}/bao_${VERSION#v}_linux_amd64.tar.gz" -o vault.tar.gz
-          tar -xzf vault.tar.gz
-          sudo install -m 755 bao /usr/local/bin/vault
-
-          chmod +x scripts/smoke-test.sh
+          chmod +x scripts/install-vault-cli.sh scripts/smoke-test.sh
+          ./scripts/install-vault-cli.sh
           ./scripts/smoke-test.sh
