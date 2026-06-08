@@ -89,3 +89,8 @@ jobs:
         run: bun run check:doppler-secrets:prd
       - name: Deploy Worker
         run: bun run deploy
+      - name: Smoke test remote cache
+        env:
+          CI: true
+          GITHUB_ACTIONS: true
+        run: bun run smoke:prd
