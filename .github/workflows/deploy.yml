@@ -272,7 +272,7 @@ jobs:
           for i in $(seq 1 60); do
             STATUS="$(flyctl certs check "${CUSTOM_DOMAIN}" --app "${FLY_APP}" 2>&1 || true)"
             echo "$STATUS"
-            if echo "$STATUS" | grep -Eiq 'ready|already.*ready|valid'; then
+            if echo "$STATUS" | grep -Eiq 'verified and active|status[[:space:]]*=[[:space:]]*issued|ready|valid'; then
               echo "Certificate is ready"
               exit 0
             fi
