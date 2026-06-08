@@ -15,6 +15,30 @@ env:
   CUSTOM_DOMAIN: vault.chrisvouga.dev
 
 jobs:
+  changes:
+    name: Detect deploy-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.filter.outputs.deploy }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Only files baked into the Fly.io image (or its deploy config) should
+      # trigger a redeploy. A redeploy restarts the machine and SEALS OpenBao,
+      # forcing the unseal job to run — so we skip it when nothing relevant
+      # changed to avoid unnecessary seals.
+      - name: Filter deploy-relevant paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            deploy:
+              - 'Dockerfile'
+              - 'docker-entrypoint.sh'
+              - 'config/openbao.hcl'
+              - 'fly.toml'
+
   provision-dns:
     name: Provision DNS
     runs-on: ubuntu-latest
@@ -189,7 +213,10 @@ jobs:
 
   deploy:
     name: Deploy to Fly.io
-    needs: migrate-db
+    needs: [migrate-db, changes]
+    # Skip the redeploy (and the seal it causes) unless image/deploy inputs
+    # changed. A manual run always forces a deploy.
+    if: ${{ needs.changes.outputs.deploy == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

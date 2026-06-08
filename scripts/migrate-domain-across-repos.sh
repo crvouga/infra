@@ -68,22 +68,17 @@ fi
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
 
-echo "==> Searching ${OWNER} repos for ${OLD_HOST}..."
-SEARCH_QUERY="${OLD_HOST}"
-REPOS_JSON="$(gh search code "$SEARCH_QUERY" --owner "$OWNER" --json repository --limit 1000)"
-REPO_LIST="$(printf '%s' "$REPOS_JSON" | python3 -c '
+echo "==> Listing ${OWNER} repos..."
+REPO_LIST="$(gh repo list "$OWNER" --no-archived --source -L 1000 --json nameWithOwner,isFork \
+  | python3 -c '
 import json, sys
-repos = set()
-for item in json.load(sys.stdin):
-    repo = item.get("repository") or {}
+for repo in json.load(sys.stdin):
     if repo.get("isFork"):
         continue
     name = repo.get("nameWithOwner")
     if name:
-        repos.add(name)
-for name in sorted(repos):
-    print(name)
-')"
+        print(name)
+' | sort)"
 
 if [ -z "$REPO_LIST" ]; then
   echo "No repos found containing ${OLD_HOST}"
@@ -97,6 +92,41 @@ updated=0
 skipped=0
 failed=0
 declare -a FAILED_REPOS=()
+
+scan_repo_for_old_host() {
+  local repo_dir="$1"
+  python3 - "$repo_dir" "$OLD_HOST" <<'PY'
+import pathlib
+import re
+import sys
+
+repo_dir = pathlib.Path(sys.argv[1])
+old_host = sys.argv[2]
+pattern = re.compile(re.escape(old_host))
+matches = []
+
+for path in repo_dir.rglob("*"):
+    if not path.is_file():
+        continue
+    if ".git" in path.parts:
+        continue
+    try:
+        data = path.read_bytes()
+    except OSError:
+        continue
+    if b"\x00" in data:
+        continue
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        continue
+    if pattern.search(text):
+        matches.append(str(path.relative_to(repo_dir)))
+
+for rel in sorted(matches):
+    print(rel)
+PY
+}
 
 replace_in_repo() {
   local repo_dir="$1"
@@ -235,34 +265,20 @@ fi
 
 echo ""
 echo "==> Verifying no remaining references in ${OWNER} repos..."
-REMAINING="$(gh search code "$OLD_HOST" --owner "$OWNER" --json repository --limit 1000)"
-REMAINING_COUNT="$(printf '%s' "$REMAINING" | python3 -c '
-import json, sys
-repos = set()
-for item in json.load(sys.stdin):
-    repo = item.get("repository") or {}
-    if repo.get("isFork"):
-        continue
-    name = repo.get("nameWithOwner")
-    if name:
-        repos.add(name)
-print(len(repos))
-')"
+REMAINING_COUNT=0
+while IFS= read -r repo; do
+  [ -n "$repo" ] || continue
+  repo_dir="${WORK_ROOT}/verify_$(echo "$repo" | tr '/' '_')"
+  rm -rf "$repo_dir"
+  git clone --depth 1 "https://github.com/${repo}.git" "$repo_dir" >/dev/null 2>&1 || continue
+  if [ -n "$(scan_repo_for_old_host "$repo_dir" || true)" ]; then
+    echo "  - ${repo}" >&2
+    REMAINING_COUNT=$((REMAINING_COUNT + 1))
+  fi
+done <<< "$REPO_LIST"
 
-if [ "$REMAINING_COUNT" != "0" ]; then
-  echo "WARNING: ${REMAINING_COUNT} repo(s) still contain ${OLD_HOST}" >&2
-  printf '%s' "$REMAINING" | python3 -c '
-import json, sys
-repos = set()
-for item in json.load(sys.stdin):
-    repo = item.get("repository") or {}
-    if not repo.get("isFork"):
-        name = repo.get("nameWithOwner")
-        if name:
-            repos.add(name)
-for name in sorted(repos):
-    print(name)
-' >&2
+if [ "$REMAINING_COUNT" -gt 0 ]; then
+  echo "ERROR: ${REMAINING_COUNT} repo(s) still contain ${OLD_HOST}" >&2
   exit 1
 fi
 
