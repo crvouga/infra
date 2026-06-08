@@ -1,5 +1,5 @@
-import { ObjectStoreImplS3 } from '@pkgs/object-store/impl-s3';
 import type { ObjectStoreS3Config } from '@pkgs/object-store/impl-s3';
+import { ObjectStoreImplS3 } from '@pkgs/object-store/impl-s3';
 
 import { DopplerSecretKey } from './doppler-secrets-registry';
 
@@ -76,6 +76,7 @@ export async function verifyB2S3Credentials(): Promise<string | null> {
     return formatB2ProbeError(message, config.bucket);
   }
 
+  //
   try {
     const stored = await store.get(probeKey);
     if (stored === null) {
