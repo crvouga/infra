@@ -28,9 +28,12 @@ fi
 
 export VAULT_ADDR
 
+# OpenBao returns 503 on /sys/health when sealed; treat sealed/uninit as reachable.
+HEALTH_URL="${VAULT_ADDR}/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200"
+
 echo "==> Waiting for OpenBao at ${VAULT_ADDR}..."
 for i in $(seq 1 60); do
-  if curl -sf "${VAULT_ADDR}/v1/sys/health" >/dev/null 2>&1; then
+  if curl -sf "${HEALTH_URL}" >/dev/null 2>&1; then
     break
   fi
   if [ "$i" -eq 60 ]; then
