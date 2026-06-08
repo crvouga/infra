@@ -11,6 +11,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=../cli/lib/vault-auth.sh
 source "${REPO_ROOT}/cli/lib/vault-auth.sh"
+# shellcheck source=lib/db-connection.sh
+source "${SCRIPT_DIR}/lib/db-connection.sh"
 
 if [ -z "${DB_CONNECTION_URI:-}" ]; then
   echo "ERROR: DB_CONNECTION_URI is required" >&2
@@ -27,6 +29,8 @@ if ! resolve_vault_bin; then
 fi
 
 export VAULT_ADDR
+DB_CONNECTION_URI="$(prepare_db_connection_uri "$DB_CONNECTION_URI")"
+export DB_CONNECTION_URI
 
 # OpenBao returns 503 on /sys/health when sealed; treat sealed/uninit as reachable.
 HEALTH_URL="${VAULT_ADDR}/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200"
@@ -50,7 +54,7 @@ if [ "$SEALED" = "false" ]; then
 fi
 
 echo "==> OpenBao is sealed. Fetching unseal keys from crvouga.kv..."
-KEYS_JSON="$(psql "$DB_CONNECTION_URI" -t -A -q --no-psqlrc \
+KEYS_JSON="$(psql_with_retry -t -A -q --no-psqlrc \
   -c "SELECT v::text FROM crvouga.kv WHERE k = '${UNSEAL_KEYS_ROW}'" \
   | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
