@@ -1,4 +1,4 @@
-app = 'secret-store-chrisvouga'
+app = 'vault-chrisvouga'
 primary_region = 'iad'
 
 [build]
