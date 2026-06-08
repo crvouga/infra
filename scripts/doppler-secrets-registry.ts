@@ -115,6 +115,32 @@ export const DOPPLER_SECRET_REGISTRY: readonly DopplerSecretDefinition[] = [
 
 export const DOPPLER_SETUP_CONFIGS = ['dev', 'prd'] as const;
 
+/** Turbo env vars consumer monorepos need to use this self-hosted cache. */
+export const TURBO_CLIENT_REQUIRED_KEYS = [
+  DopplerSecretKey.turboToken,
+  DopplerSecretKey.turboApi,
+  DopplerSecretKey.turboTeam,
+  DopplerSecretKey.turboCache,
+] as const;
+
+/** Optional Turbo client env vars copied when set in the source config. */
+export const TURBO_CLIENT_OPTIONAL_KEYS = [
+  DopplerSecretKey.turboLogOrder,
+  DopplerSecretKey.turboTelemetryDisabled,
+] as const;
+
+export function turboClientRegistryDefaults(): Readonly<
+  Record<string, string | undefined>
+> {
+  const defaults: Record<string, string | undefined> = {};
+  for (const def of DOPPLER_SECRET_REGISTRY) {
+    if (def.defaultValue !== undefined) {
+      defaults[def.key] = def.defaultValue;
+    }
+  }
+  return defaults;
+}
+
 const TURBO_CACHE_RE = /^(local|remote):(r|rw|w)?(,(local|remote):(r|rw|w)?)?$/;
 
 export function validateOptionalSecretFormat(

@@ -16,6 +16,11 @@
     "format": "prettier --write .",
     "gh:seed-doppler-service-token": "DOPPLER_CONFIG=prd bun run scripts/seed-github-doppler-service-token.ts",
     "gh": "open https://github.com/crvouga/turborepo-remote-cache/actions/workflows/deployment-pipeline.yml",
+    "seed": "bun run scripts/ensure-doppler-secrets.ts",
+    "seed:doppler": "bun run setup",
+    "seed:turbo-client": "bun run scripts/doppler-run.ts -- bun run scripts/seed-turbo-client-secrets.ts",
+    "seed:turbo-client:mirror-prd": "bun run scripts/seed-turbo-client-secrets.ts -- --mirror-prd",
+    "seed:turbo-client:prd": "DOPPLER_CONFIG=prd bun run scripts/doppler-run.ts -- bun run scripts/seed-turbo-client-secrets.ts",
     "setup": "bun run --filter @apps/api setup && bun run scripts/ensure-doppler-secrets.ts",
     "smoke": "bun run scripts/doppler-run.ts -- bun run scripts/smoke-test-cache.ts",
     "smoke:prd": "DOPPLER_CONFIG=prd bun run scripts/doppler-run.ts -- bun run scripts/smoke-test-cache.ts"
