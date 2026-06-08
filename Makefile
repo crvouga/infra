@@ -1,7 +1,7 @@
 .PHONY: gh
 
 gh:
-	open "https://github.com/crvouga/secret-store/actions"
+	open "https://github.com/crvouga/vault/actions"
 
 sync-dev-keys-to-prd:
 	./scripts/sync-dev-keys-to-prd.sh

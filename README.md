@@ -298,7 +298,7 @@ This returns HTTP 200 even when OpenBao is sealed or uninitialized, so the proce
 ## Repository Structure
 
 ```
-secret-store/
+vault/
 ├── .github/workflows/
 │   └── deploy.yml                 # CI/CD: deploy, auto-unseal, smoke-test
 ├── cli/                           # Global vault wrapper (vault run / vault setup)

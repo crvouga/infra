@@ -25,7 +25,7 @@ secrets the app needs, connect it to the store, and document the workflow.
 
 ## CLI wrapper (install once per machine)
 
-The `secret-store` repo ships a CLI wrapper with `run` and `setup` subcommands
+The `vault` repo ships a CLI wrapper with `run` and `setup` subcommands
 on top of the real
 `vault`/`bao` binary:
 
@@ -38,7 +38,7 @@ on top of the real
 
 All other `vault` subcommands pass through to the real binary.
 
-Install from the `secret-store` repo (one-time per machine):
+Install from the `vault` repo (one-time per machine):
 
 ```bash
 ./scripts/install-cli.sh          # installs wrapper to ~/.local/bin/vault
@@ -109,7 +109,7 @@ If `vault-action` fails with an audience error, add
 
 If it fails with a role/permission error:
 
-- Repo outside `crvouga/*` → tell me to authorize it from the `secret-store`
+- Repo outside `crvouga/*` → tell me to authorize it from the `vault`
   repo:
 
   ```bash
@@ -117,7 +117,7 @@ If it fails with a role/permission error:
   ```
 
 - Project path outside `secret/personal/*` → tell me to extend the CI read
-  policy in the `secret-store` repo so `ci-read` covers
+  policy in the `vault` repo so `ci-read` covers
   `secret/data/<project>/*`, then re-apply the policy.
 
 Never hardcode tokens or add a `VAULT_TOKEN` GitHub Actions secret for CI.
@@ -225,7 +225,7 @@ to git.
    or runtime token fetch.
 
 9. **Update docs.** Add a short setup section to the README:
-   - Install the `vault` wrapper (link to `secret-store` repo)
+   - Install the `vault` wrapper (link to `vault` repo)
    - `vault login`
    - `vault setup --project <repo-name> --config dev`
    - `vault run -- <dev-command>`
