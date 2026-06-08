@@ -78,7 +78,7 @@ DEV_TOKEN="$(echo "$TOKEN_JSON" | jq -r '.auth.client_token')"
 
 echo ""
 echo "================================================================================"
-echo "Dev token created (read-only on doppler/*)"
+echo "Dev token created (read-only on secret/*)"
 echo "================================================================================"
 echo ""
 echo "Log in with:"

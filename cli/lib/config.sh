@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 
 VAULT_CONFIG_FILE=".vault.yaml"
-VAULT_DEFAULT_MOUNT="${VAULT_DEFAULT_MOUNT:-doppler}"
+VAULT_DEFAULT_MOUNT="${VAULT_DEFAULT_MOUNT:-secret}"
 
 read_vault_yaml_value() {
   local file="$1"

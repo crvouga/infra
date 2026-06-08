@@ -47,13 +47,7 @@ for i in $(seq 1 60); do
   sleep 5
 done
 
-SEALED="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" | jq -r '.sealed // true')"
-if [ "$SEALED" = "false" ]; then
-  echo "==> OpenBao is already unsealed."
-  exit 0
-fi
-
-echo "==> OpenBao is sealed. Fetching unseal keys from crvouga.kv..."
+echo "==> Fetching unseal keys from crvouga.kv (in case OpenBao is sealed)..."
 KEYS_JSON="$(psql_with_retry -t -A -q --no-psqlrc \
   -c "SELECT v::text FROM crvouga.kv WHERE k = '${UNSEAL_KEYS_ROW}'" \
   | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -117,6 +111,52 @@ dump_seal_status() {
   echo "    [debug] seal-status ${label}: $(echo "$status" | jq -rc '{sealed, t, n, progress, version, type}')" >&2
 }
 
+# Canonical liveness probe. /sys/health status codes (no sealedcode override so
+# 503 distinctly means sealed):
+#   200 active+unsealed, 429 standby+unsealed, 472 DR standby, 473 perf standby,
+#   501 not initialized, 503 sealed.
+health_indicates_unsealed() {
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' \
+    "${VAULT_ADDR}/v1/sys/health?standbyok=true&perfstandbyok=true" 2>/dev/null || echo 000)"
+  case "$code" in
+    200 | 429 | 472 | 473) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# A single /sys/seal-status read off the public LB is unreliable (it can hit a
+# node mid-transition, a standby, or a brief restart). Corroborate with the
+# health endpoint and treat sealed=false from either signal as unsealed.
+check_unsealed() {
+  local status sealed
+  status="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null || echo '{}')"
+  sealed="$(echo "$status" | jq -r '.sealed // empty')"
+  if [ "$sealed" = "false" ]; then
+    return 0
+  fi
+  if [ "$sealed" != "true" ] && health_indicates_unsealed; then
+    return 0
+  fi
+  return 1
+}
+
+# Unseal completion is asynchronous: after the threshold key the node briefly
+# still reports sealed=true while it finishes post-unseal setup, then flips to
+# sealed=false. Poll (tolerating transient/flapping reads) before deciding.
+wait_unsealed() {
+  local timeout="$1"
+  local elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    if check_unsealed; then
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  return 1
+}
+
 SEAL_STATUS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status")"
 UNSEAL_THRESHOLD="$(echo "$SEAL_STATUS" | jq -r '.t // empty')"
 if [ -z "$UNSEAL_THRESHOLD" ] || [ "$UNSEAL_THRESHOLD" = "null" ]; then
@@ -170,6 +210,11 @@ extract_unseal_key() {
   return 1
 }
 
+if check_unsealed; then
+  echo "==> OpenBao is already unsealed."
+  exit 0
+fi
+
 echo "==> Applying ${UNSEAL_THRESHOLD} unseal key(s) (threshold from seal-status)..."
 dump_seal_status "before"
 
@@ -212,37 +257,38 @@ for i in $(seq 1 "$UNSEAL_THRESHOLD"); do
   PROGRESS="$(echo "$STATUS" | jq -r '.progress // 0')"
   echo "    [debug] progress after key ${i}: ${PREV_PROGRESS} -> ${PROGRESS} (sealed=${SEALED})" >&2
 
-  if [ "$SEALED" = "false" ]; then
+  # Reaching the threshold resets progress to 0 as the node unseals. That flip
+  # is async, so poll briefly before moving on or warning.
+  if wait_unsealed 10; then
     echo "==> OpenBao unsealed successfully."
     exit 0
   fi
 
   if [ "$PROGRESS" = "$PREV_PROGRESS" ] && [ "$PROGRESS" != "0" ]; then
-    echo "    [debug] WARNING: progress did NOT advance after key ${i}." >&2
-    echo "    [debug] The key was accepted as well-formed but is a duplicate or" >&2
-    echo "    [debug] belongs to a different (stale) init than the running node." >&2
-  elif [ "$PROGRESS" = "0" ] && [ "$i" -gt 0 ]; then
-    echo "    [debug] WARNING: progress reset to 0 after key ${i} — key is likely" >&2
-    echo "    [debug] INVALID for this seal (wrong format / wrong init)." >&2
+    echo "    [debug] WARNING: progress did NOT advance after key ${i} — likely a" >&2
+    echo "    [debug] duplicate share or a key from a different (stale) init." >&2
+  elif [ "$PROGRESS" = "0" ] && [ "$i" -lt "$UNSEAL_THRESHOLD" ]; then
+    echo "    [debug] WARNING: progress reset to 0 before reaching threshold after" >&2
+    echo "    [debug] key ${i} — this key is likely INVALID for this seal." >&2
   fi
   PREV_PROGRESS="$PROGRESS"
 done
 
 dump_seal_status "after-all-keys"
-SEALED="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" | jq -r '.sealed // true')"
-if [ "$SEALED" != "false" ]; then
-  FINAL_PROGRESS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null | jq -r '.progress // 0')"
-  echo "ERROR: OpenBao is still sealed after applying ${UNSEAL_THRESHOLD} key(s)" >&2
-  echo "       Final progress=${FINAL_PROGRESS}/${UNSEAL_THRESHOLD}." >&2
-  if [ "$FINAL_PROGRESS" -lt "$UNSEAL_THRESHOLD" ] 2>/dev/null; then
-    echo "       Progress < threshold means accepted keys did not count toward unseal:" >&2
-    echo "         - duplicate keys (same share applied twice), or" >&2
-    echo "         - keys from a previous init that don't match this node's seal." >&2
-    echo "       Compare the sha256 fingerprints above; if any repeat, the stored" >&2
-    echo "       keys are duplicated. If all are unique, they are stale — re-fetch" >&2
-    echo "       the current init's keys into crvouga.kv (k='${UNSEAL_KEYS_ROW}')." >&2
-  fi
-  exit 1
+if wait_unsealed 30; then
+  echo "==> OpenBao unsealed successfully."
+  exit 0
 fi
 
-echo "==> OpenBao unsealed successfully."
+FINAL_PROGRESS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null | jq -r '.progress // 0')"
+echo "ERROR: OpenBao is still sealed after applying ${UNSEAL_THRESHOLD} key(s)" >&2
+echo "       Final progress=${FINAL_PROGRESS}/${UNSEAL_THRESHOLD}." >&2
+if [ "$FINAL_PROGRESS" -lt "$UNSEAL_THRESHOLD" ] 2>/dev/null; then
+  echo "       Progress < threshold means accepted keys did not count toward unseal:" >&2
+  echo "         - duplicate keys (same share applied twice), or" >&2
+  echo "         - keys from a previous init that don't match this node's seal." >&2
+  echo "       Compare the sha256 fingerprints above; if any repeat, the stored" >&2
+  echo "       keys are duplicated. If all are unique, they are stale — re-fetch" >&2
+  echo "       the current init's keys into crvouga.kv (k='${UNSEAL_KEYS_ROW}')." >&2
+fi
+exit 1

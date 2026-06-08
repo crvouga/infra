@@ -8,8 +8,8 @@ Usage: vault run [OPTIONS] -- <command> [args...]
 Fetch secrets from Vault and run a command with them injected as env vars.
 
 Options:
-  --path PATH       Full KV path (e.g. doppler/myapp/dev)
-  --mount PATH      KV mount (default: doppler, or from .vault.yaml)
+  --path PATH       Full KV path (e.g. secret/myapp/dev)
+  --mount PATH      KV mount (default: secret, or from .vault.yaml)
   --project NAME    Doppler-style project name
   --config NAME     Doppler-style config/environment name
   --dry-run         Print secret path and env var names only (no values)
@@ -147,7 +147,7 @@ Write a .vault.yaml config file in the current directory (Doppler-style setup).
 Options:
   --project NAME   Project name (required)
   --config NAME    Config/environment name (required)
-  --mount PATH     KV mount (default: doppler)
+  --mount PATH     KV mount (default: secret)
   --addr URL       Vault address (default: https://secret-store.chrisvouga.dev)
   -h, --help       Show this help
 

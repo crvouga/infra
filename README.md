@@ -191,7 +191,7 @@ Smoke tests run automatically at the end of the Deploy workflow on every push to
 
 Use [`scripts/migrate-doppler-to-openbao.sh`](scripts/migrate-doppler-to-openbao.sh) to copy secrets from Doppler into OpenBao. The script is read-only against Doppler and writes to OpenBao only.
 
-**Mapping:** each Doppler project/config (e.g. `myapp` / `prd`) becomes one KV v2 secret at `doppler/<project>/<config>`. Each Doppler key becomes a field on that secret. Reserved `DOPPLER_*` keys are excluded.
+**Mapping:** each Doppler project/config (e.g. `myapp` / `prd`) becomes one KV v2 secret at `secret/<project>/<config>`. Each Doppler key becomes a field on that secret. Reserved `DOPPLER_*` keys are excluded.
 
 **Prerequisites:**
 
@@ -211,19 +211,19 @@ chmod +x scripts/vault-run.sh scripts/migrate-doppler-to-openbao.sh
 ./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh
 
 # Limit to specific projects or use a custom mount
-./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --project myapp --mount doppler
+./scripts/vault-run.sh -- ./scripts/migrate-doppler-to-openbao.sh --project myapp --mount secret
 ```
 
 | Flag | Purpose |
 |------|---------|
 | `--dry-run` | List paths and key counts without writing |
-| `--mount PATH` | KV v2 mount (default: `doppler`) |
+| `--mount PATH` | KV v2 mount (default: `secret`) |
 | `--project NAME` | Limit to specific Doppler projects (repeatable) |
 
 Re-running the script is safe — KV v2 creates a new version for each write. Verify a migrated secret:
 
 ```bash
-vault kv get -format=json doppler/myapp/prd
+vault kv get -format=json secret/myapp/prd
 ```
 
 ## Using secrets locally (Doppler-style)
@@ -274,7 +274,7 @@ This writes [`.vault.yaml`](.vault.yaml.example) (like Doppler's `doppler.yaml`)
 
 ```yaml
 addr: https://secret-store.chrisvouga.dev
-mount: doppler
+mount: secret
 project: myapp
 config: dev
 ```
@@ -287,7 +287,7 @@ vault run --dry-run -- npm test    # preview env var names only
 vault run --project myapp --config prd -- npm start   # override .vault.yaml
 ```
 
-Secrets are read from `doppler/<project>/<config>` (KV v2). Each field becomes an environment variable.
+Secrets are read from `secret/<project>/<config>` (KV v2). Each field becomes an environment variable.
 
 ## Fly Secrets
 

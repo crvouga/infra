@@ -7,12 +7,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=../cli/lib/vault-auth.sh
 source "${REPO_ROOT}/cli/lib/vault-auth.sh"
 
-MOUNT_PATH="doppler"
+MOUNT_PATH="secret"
 DRY_RUN=false
 declare -a PROJECT_FILTER=()
 
 TMPFILE=""
-CONFIGS_MIGRATED=0
+CONFIGS_CREATED=0
+CONFIGS_UPDATED=0
 CONFIGS_SKIPPED=0
 TOTAL_KEYS=0
 
@@ -27,8 +28,12 @@ Each Doppler project/config becomes one OpenBao secret at:
 
 Each Doppler key becomes a field on that secret. DOPPLER_* reserved keys are excluded.
 
+Writes are upserts: if the secret already exists, Doppler values overwrite
+matching keys while any other existing fields are preserved (kv patch). New
+secrets are created with kv put.
+
 Options:
-  --mount PATH     KV v2 mount path (default: doppler)
+  --mount PATH     KV v2 mount path (default: secret)
   --project NAME   Limit to a specific Doppler project (repeatable)
   --dry-run        List paths and key counts without writing to OpenBao
   -h, --help       Show this help
@@ -79,6 +84,11 @@ list_projects() {
       | .name // .slug
     '
   fi
+}
+
+secret_exists() {
+  local path="$1"
+  vault_cmd kv metadata get "$path" >/dev/null 2>&1
 }
 
 list_configs() {
@@ -223,14 +233,24 @@ for project in "${PROJECTS[@]}"; do
       continue
     fi
 
-    if [ "$DRY_RUN" = true ]; then
-      echo "    ${secret_path}: would write ${key_count} key(s)"
+    if secret_exists "${secret_path}"; then
+      if [ "$DRY_RUN" = true ]; then
+        echo "    ${secret_path}: would upsert ${key_count} key(s) (overwrite matching, preserve others)"
+      else
+        echo "    ${secret_path}: upserting ${key_count} key(s)..."
+        vault_cmd kv patch "${secret_path}" @"$TMPFILE"
+      fi
+      CONFIGS_UPDATED=$((CONFIGS_UPDATED + 1))
     else
-      echo "    ${secret_path}: writing ${key_count} key(s)..."
-      vault_cmd kv put "${secret_path}" @"$TMPFILE"
+      if [ "$DRY_RUN" = true ]; then
+        echo "    ${secret_path}: would create with ${key_count} key(s)"
+      else
+        echo "    ${secret_path}: creating with ${key_count} key(s)..."
+        vault_cmd kv put "${secret_path}" @"$TMPFILE"
+      fi
+      CONFIGS_CREATED=$((CONFIGS_CREATED + 1))
     fi
 
-    CONFIGS_MIGRATED=$((CONFIGS_MIGRATED + 1))
     TOTAL_KEYS=$((TOTAL_KEYS + key_count))
   done
 
@@ -245,7 +265,8 @@ else
 fi
 echo "================================================================================"
 echo ""
-echo "Configs migrated: ${CONFIGS_MIGRATED}"
+echo "Configs created:  ${CONFIGS_CREATED}"
+echo "Configs upserted: ${CONFIGS_UPDATED}"
 echo "Configs skipped:  ${CONFIGS_SKIPPED}"
 echo "Total keys:       ${TOTAL_KEYS}"
 echo "OpenBao mount:    ${MOUNT_PATH}/"
