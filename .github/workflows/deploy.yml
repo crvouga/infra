@@ -1,9 +1,7 @@
 name: Deploy
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -205,42 +203,9 @@ jobs:
           flyctl deploy --remote-only --app "${FLY_APP}"
           flyctl scale count 1 --app "${FLY_APP}" --yes
 
-  unseal:
-    name: Unseal OpenBao
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y curl ca-certificates lsb-release jq
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
-
-      - name: Unseal OpenBao
-        env:
-          VAULT_ADDR: https://${{ env.CUSTOM_DOMAIN }}
-          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
-        run: |
-          set -euo pipefail
-          chmod +x scripts/install-vault-cli.sh scripts/repair-openbao-auth-mounts.sh scripts/unseal.sh
-          ./scripts/install-vault-cli.sh
-          ./scripts/repair-openbao-auth-mounts.sh
-          ./scripts/unseal.sh
-
   issue-tls:
     name: Issue TLS Certificate
-    needs: unseal
+    needs: deploy
     runs-on: ubuntu-latest
     steps:
       - name: Setup Flyctl
@@ -281,26 +246,3 @@ jobs:
             fi
             sleep 30
           done
-
-  smoke-test:
-    name: Smoke Test
-    needs: issue-tls
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Run smoke test
-        env:
-          VAULT_ADDR: https://${{ env.CUSTOM_DOMAIN }}
-          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${VAULT_TOKEN}" ]; then
-            echo "VAULT_TOKEN not configured — skipping smoke test (add after running init.sh)"
-            exit 0
-          fi
-
-          chmod +x scripts/install-vault-cli.sh scripts/smoke-test.sh
-          ./scripts/install-vault-cli.sh
-          ./scripts/smoke-test.sh
