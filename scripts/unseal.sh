@@ -123,6 +123,20 @@ if [ -z "$UNSEAL_THRESHOLD" ] || [ "$UNSEAL_THRESHOLD" = "null" ]; then
   UNSEAL_THRESHOLD="${UNSEAL_THRESHOLD_OVERRIDE:-3}"
 fi
 
+# Strip surrounding whitespace and a single layer of wrapping quotes that can
+# sneak in when keys are stored as double-encoded JSON strings.
+sanitize_key() {
+  local key="$1"
+  key="$(printf '%s' "$key" | tr -d '\n\r')"
+  key="${key#"${key%%[![:space:]]*}"}"
+  key="${key%"${key##*[![:space:]]}"}"
+  if [ "${key#\"}" != "$key" ] && [ "${key%\"}" != "$key" ]; then
+    key="${key#\"}"
+    key="${key%\"}"
+  fi
+  printf '%s' "$key"
+}
+
 extract_unseal_key() {
   local keys_json="$1"
   local index="$2"
@@ -131,25 +145,25 @@ extract_unseal_key() {
 
   key="$(echo "$keys_json" | jq -r --arg n "$index" '.["key_" + $n] // empty')"
   if [ -n "$key" ]; then
-    printf '%s' "$key"
+    sanitize_key "$key"
     return 0
   fi
 
   key="$(echo "$keys_json" | jq -r --argjson idx "$idx" '.unseal_keys_b64[$idx] // empty')"
   if [ -n "$key" ]; then
-    printf '%s' "$key"
+    sanitize_key "$key"
     return 0
   fi
 
   key="$(echo "$keys_json" | jq -r --argjson idx "$idx" '.keys_base64[$idx] // empty')"
   if [ -n "$key" ]; then
-    printf '%s' "$key"
+    sanitize_key "$key"
     return 0
   fi
 
   key="$(echo "$keys_json" | jq -r --argjson idx "$idx" '.keys[$idx] // empty')"
   if [ -n "$key" ]; then
-    printf '%s' "$key"
+    sanitize_key "$key"
     return 0
   fi
 
@@ -157,14 +171,32 @@ extract_unseal_key() {
 }
 
 echo "==> Applying ${UNSEAL_THRESHOLD} unseal key(s) (threshold from seal-status)..."
+dump_seal_status "before"
+
+# Track fingerprints to catch duplicate shares (a top cause of "still sealed").
+SEEN_FINGERPRINTS=""
+PREV_PROGRESS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null | jq -r '.progress // 0')"
+
 for i in $(seq 1 "$UNSEAL_THRESHOLD"); do
-  KEY="$(extract_unseal_key "$KEYS_JSON" "$i" | tr -d '\n\r' || true)"
+  KEY="$(extract_unseal_key "$KEYS_JSON" "$i" || true)"
   if [ -z "$KEY" ]; then
     echo "ERROR: unseal key ${i} missing from crvouga.kv (need ${UNSEAL_THRESHOLD} key(s))" >&2
     echo "       Expected keys_base64[], unseal_keys_b64[], or key_${i} in v." >&2
     exit 1
   fi
-  echo "    Unseal key ${i}/${UNSEAL_THRESHOLD}..."
+
+  KEY_FP="$(fingerprint_key "$KEY")"
+  echo "    Unseal key ${i}/${UNSEAL_THRESHOLD} [debug] ${KEY_FP}"
+
+  KEY_SUM="${KEY_FP##*sha256=}"
+  case " ${SEEN_FINGERPRINTS} " in
+    *" ${KEY_SUM} "*)
+      echo "    [debug] WARNING: key ${i} is a DUPLICATE of an earlier key (same sha256=${KEY_SUM})." >&2
+      echo "    [debug] OpenBao ignores duplicate shares, so progress will not advance." >&2
+      ;;
+  esac
+  SEEN_FINGERPRINTS="${SEEN_FINGERPRINTS} ${KEY_SUM}"
+
   UNSEAL_OUTPUT="$(vault_cmd operator unseal "$KEY" 2>&1)" || {
     echo "$UNSEAL_OUTPUT" >&2
     if echo "$UNSEAL_OUTPUT" | grep -qi "failed to setup auth table"; then
@@ -175,16 +207,41 @@ for i in $(seq 1 "$UNSEAL_THRESHOLD"); do
   }
 
   # CLI defaults to table output; query seal-status API for JSON.
-  SEALED="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" | jq -r '.sealed // true')"
+  STATUS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null || echo '{}')"
+  SEALED="$(echo "$STATUS" | jq -r '.sealed // true')"
+  PROGRESS="$(echo "$STATUS" | jq -r '.progress // 0')"
+  echo "    [debug] progress after key ${i}: ${PREV_PROGRESS} -> ${PROGRESS} (sealed=${SEALED})" >&2
+
   if [ "$SEALED" = "false" ]; then
     echo "==> OpenBao unsealed successfully."
     exit 0
   fi
+
+  if [ "$PROGRESS" = "$PREV_PROGRESS" ] && [ "$PROGRESS" != "0" ]; then
+    echo "    [debug] WARNING: progress did NOT advance after key ${i}." >&2
+    echo "    [debug] The key was accepted as well-formed but is a duplicate or" >&2
+    echo "    [debug] belongs to a different (stale) init than the running node." >&2
+  elif [ "$PROGRESS" = "0" ] && [ "$i" -gt 0 ]; then
+    echo "    [debug] WARNING: progress reset to 0 after key ${i} — key is likely" >&2
+    echo "    [debug] INVALID for this seal (wrong format / wrong init)." >&2
+  fi
+  PREV_PROGRESS="$PROGRESS"
 done
 
+dump_seal_status "after-all-keys"
 SEALED="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" | jq -r '.sealed // true')"
 if [ "$SEALED" != "false" ]; then
+  FINAL_PROGRESS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null | jq -r '.progress // 0')"
   echo "ERROR: OpenBao is still sealed after applying ${UNSEAL_THRESHOLD} key(s)" >&2
+  echo "       Final progress=${FINAL_PROGRESS}/${UNSEAL_THRESHOLD}." >&2
+  if [ "$FINAL_PROGRESS" -lt "$UNSEAL_THRESHOLD" ] 2>/dev/null; then
+    echo "       Progress < threshold means accepted keys did not count toward unseal:" >&2
+    echo "         - duplicate keys (same share applied twice), or" >&2
+    echo "         - keys from a previous init that don't match this node's seal." >&2
+    echo "       Compare the sha256 fingerprints above; if any repeat, the stored" >&2
+    echo "       keys are duplicated. If all are unique, they are stale — re-fetch" >&2
+    echo "       the current init's keys into crvouga.kv (k='${UNSEAL_KEYS_ROW}')." >&2
+  fi
   exit 1
 fi
 
