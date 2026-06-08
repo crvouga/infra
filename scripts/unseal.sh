@@ -4,7 +4,7 @@ set -euo pipefail
 
 VAULT_ADDR="${VAULT_ADDR:-https://secret-store.chrisvouga.dev}"
 UNSEAL_THRESHOLD="${UNSEAL_THRESHOLD:-3}"
-UNSEAL_KEYS_ROW="${UNSEAL_KEYS_ROW:-unseal_keys}"
+UNSEAL_KEYS_ROW="${UNSEAL_KEYS_ROW:-secret-store/unseal-keys}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
