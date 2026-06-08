@@ -1,7 +1,7 @@
 import type { SecretStore } from '@pkgs/secret-store';
 import { createCachingSecretStore, VaultSecretStore } from '@pkgs/secret-store';
 
-const DEFAULT_VAULT_ADDR = 'https://secret-store.chrisvouga.dev';
+const DEFAULT_VAULT_ADDR = 'https://vault.chrisvouga.dev';
 const DEFAULT_VAULT_MOUNT = 'secret';
 const DEFAULT_VAULT_PROJECT = 'personal';
 const DEFAULT_VAULT_CONFIG = 'dev';

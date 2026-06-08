@@ -16,11 +16,11 @@ routes = [{ pattern = "turborepo.chrisvouga.dev", custom_domain = true }]
 # Worker (turborepo-remote-cache-dev).
 [env.dev]
 name = "turborepo-remote-cache"
-vars = { VAULT_ADDR = "https://secret-store.chrisvouga.dev", VAULT_PROJECT = "personal", VAULT_CONFIG = "dev" }
+vars = { VAULT_ADDR = "https://vault.chrisvouga.dev", VAULT_PROJECT = "personal", VAULT_CONFIG = "dev" }
 
 [env.prd]
 name = "turborepo-remote-cache"
-vars = { VAULT_ADDR = "https://secret-store.chrisvouga.dev", VAULT_PROJECT = "personal", VAULT_CONFIG = "prd" }
+vars = { VAULT_ADDR = "https://vault.chrisvouga.dev", VAULT_PROJECT = "personal", VAULT_CONFIG = "prd" }
 
 [observability]
 [observability.logs]

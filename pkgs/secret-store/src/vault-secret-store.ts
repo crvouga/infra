@@ -12,12 +12,12 @@ import type {
 } from './interface';
 import { wrapSecret, wrapSecretOptional } from './wrap-secret';
 
-const DEFAULT_ADDR = 'https://secret-store.chrisvouga.dev';
+const DEFAULT_ADDR = 'https://vault.chrisvouga.dev';
 const DEFAULT_MOUNT = 'secret';
 
 export type VaultSecretStoreOptions = {
   token: string;
-  /** Vault API address. @default https://secret-store.chrisvouga.dev */
+  /** Vault API address. @default https://vault.chrisvouga.dev */
   addr?: string;
   /** KV v2 mount path. @default secret */
   mount?: string;

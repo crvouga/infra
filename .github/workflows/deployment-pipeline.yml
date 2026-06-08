@@ -29,11 +29,11 @@ jobs:
       - name: Import Vault secrets (dev)
         uses: hashicorp/vault-action@v4
         with:
-          url: https://secret-store.chrisvouga.dev
+          url: https://vault.chrisvouga.dev
           method: jwt
           path: jwt
           role: github-actions
-          jwtGithubAudience: https://secret-store.chrisvouga.dev
+          jwtGithubAudience: https://vault.chrisvouga.dev
           secrets: |
             secret/data/personal/dev TURBO_TOKEN | TURBO_TOKEN ;
             secret/data/personal/dev TURBO_API | TURBO_API ;
@@ -74,11 +74,11 @@ jobs:
       - name: Import Vault secrets (prd)
         uses: hashicorp/vault-action@v4
         with:
-          url: https://secret-store.chrisvouga.dev
+          url: https://vault.chrisvouga.dev
           method: jwt
           path: jwt
           role: github-actions
-          jwtGithubAudience: https://secret-store.chrisvouga.dev
+          jwtGithubAudience: https://vault.chrisvouga.dev
           secrets: |
             secret/data/personal/prd TURBO_TOKEN | TURBO_TOKEN ;
             secret/data/personal/prd TURBO_API | TURBO_API ;
