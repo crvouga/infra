@@ -19,6 +19,7 @@ PROJECTS_SKIPPED=0
 PROJECTS_IN_SYNC=0
 PRD_CREATED=0
 PRD_PATCHED=0
+PRD_OVERRIDDEN=0
 TOTAL_KEYS_ADDED=0
 
 usage() {
@@ -29,10 +30,12 @@ Ensure each project's prd secret contains every key from its dev secret.
 
 For each project at <mount>/<project>/:
   - Source: <mount>/<project>/dev  (read only)
-  - Target: <mount>/<project>/prd  (write missing keys only)
+  - Target: <mount>/<project>/prd
 
-Missing keys in prd are copied from dev. Existing prd keys are never
-overwritten. Keys present only in prd are left unchanged. Never syncs prd → dev.
+If prd is missing or has no keys, the entire dev secret is copied into prd.
+Otherwise, missing keys in prd are copied from dev. Existing prd keys are
+never overwritten. Keys present only in prd are left unchanged. Never syncs
+prd → dev.
 
 Options:
   --mount PATH     KV v2 mount path (default: secret)
@@ -180,7 +183,7 @@ fi
 if [ "$DRY_RUN" = true ]; then
   echo "==> Dry run mode — no secrets will be written to OpenBao"
 else
-  echo "==> Syncing missing ${SOURCE_CONFIG} keys into ${TARGET_CONFIG} (create only, never overwrite)"
+  echo "==> Syncing ${SOURCE_CONFIG} into ${TARGET_CONFIG} (full copy when empty; otherwise add missing keys only)"
 fi
 
 echo "==> Enumerating projects under ${MOUNT_PATH}/..."
@@ -212,9 +215,28 @@ for project in "${PROJECTS[@]}"; do
   prd_fields="$(read_secret_fields "$prd_path")"
 
   dev_key_count="$(echo "$dev_fields" | jq 'length')"
+  prd_key_count="$(echo "$prd_fields" | jq 'length')"
   if [ "$dev_key_count" -eq 0 ]; then
     echo "==> ${project}: skipped (${SOURCE_CONFIG} secret has no keys)"
     PROJECTS_SKIPPED=$((PROJECTS_SKIPPED + 1))
+    continue
+  fi
+
+  PROJECTS_PROCESSED=$((PROJECTS_PROCESSED + 1))
+
+  if [ "$prd_key_count" -eq 0 ]; then
+    echo "$dev_fields" > "$TMPFILE"
+    key_names="$(jq -r 'keys | join(", ")' "$TMPFILE")"
+
+    if [ "$DRY_RUN" = true ]; then
+      echo "==> ${project}/${TARGET_CONFIG}: would copy all ${dev_key_count} key(s) from ${SOURCE_CONFIG} (empty ${TARGET_CONFIG}): ${key_names}"
+    else
+      echo "==> ${project}/${TARGET_CONFIG}: copying all ${dev_key_count} key(s) from ${SOURCE_CONFIG} (empty ${TARGET_CONFIG}): ${key_names}"
+      vault_cmd kv put "$prd_path" @"$TMPFILE"
+      PRD_OVERRIDDEN=$((PRD_OVERRIDDEN + 1))
+    fi
+
+    TOTAL_KEYS_ADDED=$((TOTAL_KEYS_ADDED + dev_key_count))
     continue
   fi
 
@@ -224,8 +246,6 @@ for project in "${PROJECTS[@]}"; do
   missing_count="$(jq 'length' "$TMPFILE")"
   prd_only_count="$(jq -n --argjson dev "$dev_fields" --argjson prd "$prd_fields" \
     '$prd | keys | map(select(. as $k | ($dev | has($k)) | not)) | length')"
-
-  PROJECTS_PROCESSED=$((PROJECTS_PROCESSED + 1))
 
   if [ "$missing_count" -eq 0 ]; then
     echo "==> ${project}/${TARGET_CONFIG}: up to date (${dev_key_count} key(s) in ${SOURCE_CONFIG})"
@@ -271,6 +291,7 @@ echo "Projects skipped:    ${PROJECTS_SKIPPED} (no ${SOURCE_CONFIG} secret or em
 echo "Projects in sync:    ${PROJECTS_IN_SYNC}"
 echo "Prd secrets created: ${PRD_CREATED}"
 echo "Prd secrets patched: ${PRD_PATCHED}"
+echo "Prd secrets replaced (empty): ${PRD_OVERRIDDEN}"
 echo "Keys added to prd:   ${TOTAL_KEYS_ADDED}"
 echo "Mount:               ${MOUNT_PATH}/"
 echo ""
