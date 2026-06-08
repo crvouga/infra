@@ -145,7 +145,9 @@ To add a new migration, create `migrations/003_description.sql` using fully qual
 
 ## Manual Unseal
 
-OpenBao does **not** use auto-unseal. After a machine restart or redeploy, OpenBao will be **sealed** and must be unsealed manually:
+After a machine restart or redeploy, OpenBao starts **sealed**. CI auto-unseals on deploy if unseal keys are stored in `crvouga.kv` (managed out of band).
+
+To unseal manually (3 of 5 keys):
 
 ```bash
 export VAULT_ADDR="https://secret-store.chrisvouga.dev"
@@ -319,6 +321,7 @@ secret-store/
 │   ├── migrate.sh                      # Apply database migrations
 │   ├── install-cli.sh                  # Install global vault wrapper
 │   ├── create-dev-token.sh             # Create scoped local-dev token
+│   ├── unseal.sh                       # Auto-unseal after deploy (used by CI)
 │   ├── vault-run.sh                    # Run a command with Vault API credentials
 │   ├── migrate-doppler-to-openbao.sh   # Copy secrets from Doppler to OpenBao
 │   ├── seed-github-secrets.sh          # Auto-fetch + seed GitHub/Fly secrets

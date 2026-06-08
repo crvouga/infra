@@ -145,9 +145,36 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --remote-only --app "${FLY_APP}"
 
+  unseal:
+    name: Unseal OpenBao
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client jq
+
+      - name: Unseal OpenBao
+        env:
+          VAULT_ADDR: https://${{ env.CUSTOM_DOMAIN }}
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+          UNSEAL_THRESHOLD: "3"
+        run: |
+          set -euo pipefail
+
+          VERSION="$(curl -sf https://api.github.com/repos/openbao/openbao/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/openbao/openbao/releases/download/${VERSION}/bao_${VERSION#v}_linux_amd64.tar.gz" -o vault.tar.gz
+          tar -xzf vault.tar.gz
+          sudo install -m 755 bao /usr/local/bin/vault
+
+          chmod +x scripts/unseal.sh
+          ./scripts/unseal.sh
+
   issue-tls:
     name: Issue TLS Certificate
-    needs: deploy
+    needs: unseal
     runs-on: ubuntu-latest
     steps:
       - name: Setup Flyctl
