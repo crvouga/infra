@@ -64,10 +64,58 @@ if [ -z "$KEYS_JSON" ]; then
   exit 1
 fi
 
+# crvouga.kv.v may be stored double-encoded (a JSON string containing JSON).
+# Unwrap until we land on an object, so extraction below sees the real shape.
+for _ in 1 2 3; do
+  if echo "$KEYS_JSON" | jq -e 'type == "string"' >/dev/null 2>&1; then
+    KEYS_JSON="$(echo "$KEYS_JSON" | jq -r '.')"
+  else
+    break
+  fi
+done
+
 if ! echo "$KEYS_JSON" | jq -e . >/dev/null 2>&1; then
   echo "ERROR: Unseal keys at crvouga.kv (k='${UNSEAL_KEYS_ROW}') are not valid JSON" >&2
   exit 1
 fi
+
+# --- Debug: show the shape of the stored value without leaking key material ---
+echo "==> [debug] unseal-keys JSON shape:"
+echo "$KEYS_JSON" | jq -r '
+  if type == "object" then
+    "    top-level type: object",
+    "    top-level keys: " + ([keys[]] | join(", ")),
+    (to_entries[]
+      | if (.value | type) == "array"
+        then "    ." + .key + ": array(len=" + (.value | length | tostring) + ")"
+        else "    ." + .key + ": " + (.value | type) end)
+  else
+    "    top-level type: " + type
+  end
+' >&2 || true
+
+# Fingerprint a key without revealing it: length, first/last chars, sha256 prefix.
+fingerprint_key() {
+  local key="$1"
+  local len="${#key}"
+  local head="${key:0:4}"
+  local tail="${key: -4}"
+  local sum="n/a"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sum="$(printf '%s' "$key" | sha256sum | cut -c1-12)"
+  elif command -v shasum >/dev/null 2>&1; then
+    sum="$(printf '%s' "$key" | shasum -a 256 | cut -c1-12)"
+  fi
+  printf 'len=%s head=%q tail=%q sha256=%s' "$len" "$head" "$tail" "$sum"
+}
+
+# Dump seal-status progress fields (no secrets) so we can see if a key landed.
+dump_seal_status() {
+  local label="$1"
+  local status
+  status="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null || echo '{}')"
+  echo "    [debug] seal-status ${label}: $(echo "$status" | jq -rc '{sealed, t, n, progress, version, type}')" >&2
+}
 
 SEAL_STATUS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status")"
 UNSEAL_THRESHOLD="$(echo "$SEAL_STATUS" | jq -r '.t // empty')"
