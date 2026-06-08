@@ -1,7 +1,10 @@
 {
   "cSpell.words": [
     "chrisvouga",
+    "Dockerfiles",
     "flyctl",
+    "lockfiles",
+    "Makefiles",
     "openbao",
     "pipefail",
     "pkey",
