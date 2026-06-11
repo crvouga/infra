@@ -1,0 +1,191 @@
+# Single source of truth for the single-node Docker stack.
+# Images are built and pushed by each project repo — this repo only consumes them.
+
+zone: chrisvouga.dev
+origin_hostname: origin.chrisvouga.dev
+image_owner: crvouga
+default_image_tag: latest
+skip_rollout_repos:
+  - crvouga/portfolio
+
+services:
+  - id: portfolio
+    hostname: www.chrisvouga.dev
+    github_repo: crvouga/portfolio
+    source_code_url: https://github.com/crvouga/portfolio
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: pickflix
+    hostname: pickflix.chrisvouga.dev
+    github_repo: crvouga/pickflix-v1
+    source_code_url: https://github.com/crvouga/pickflix-v1
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 9000
+    health_check: true
+    env:
+      PORT: "9000"
+    secrets:
+      - name: DATABASE_URL
+        source: literal
+        value: noop
+      - name: PORT
+        source: literal
+        value: "9000"
+      - name: SECRET
+        source: literal
+        value: noop
+      - name: SEND_GRID_API_KEY
+        source: literal
+        value: noop
+      - name: SEND_GRID_REGISTERED_EMAIL_ADDRESS
+        source: literal
+        value: noop
+      - name: SESSION_COOKIE_SECRET
+        source: literal
+        value: noop
+      - name: YOUTUBE_API_KEY
+        source: literal
+        value: noop
+      - name: TMDB_API_READ_ACCESS_TOKEN
+        source: vault
+
+  - id: moviefinder-app-rust
+    hostname: moviefinder-app-rust.chrisvouga.dev
+    github_repo: crvouga/moviefinder.app-rust
+    source_code_url: https://github.com/crvouga/moviefinder.app-rust
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 3000
+    health_check: true
+    env:
+      PORT: "3000"
+    secrets: &moviefinder_secrets
+      - name: TMDB_API_READ_ACCESS_TOKEN
+        source: vault
+      - name: TWILIO_ACCOUNT_SID
+        source: vault
+      - name: TWILIO_AUTH_TOKEN
+        source: vault
+      - name: TWILIO_SERVICE_SID
+        source: vault
+
+  - id: moviefinder-app-go
+    hostname: moviefinder-app-go.chrisvouga.dev
+    github_repo: crvouga/moviefinder.app-go
+    source_code_url: https://github.com/crvouga/moviefinder.app-go
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 8080
+    health_check: true
+    env:
+      PORT: "8080"
+    secrets: *moviefinder_secrets
+
+  - id: moviefinder-app-react
+    hostname: moviefinder-app-react.chrisvouga.dev
+    github_repo: crvouga/moviefinder.app-react
+    source_code_url: https://github.com/crvouga/moviefinder.app-react
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 3000
+    health_check: true
+    env:
+      PORT: "3000"
+    secrets: *moviefinder_secrets
+
+  - id: moviefinder-app-clojurescript
+    hostname: moviefinder-app-clojurescript.chrisvouga.dev
+    github_repo: crvouga/moviefinder.app-clojurescript
+    source_code_url: https://github.com/crvouga/moviefinder.app-clojurescript
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 9630
+    health_check: true
+    env:
+      PORT: "9630"
+    secrets: *moviefinder_secrets
+
+  - id: headless-combobox-svelte-example
+    hostname: svelte.headlesscombobox.chrisvouga.dev
+    github_repo: crvouga/headless-combobox
+    source_code_url: https://github.com/crvouga/headless-combobox
+    dockerfile: example/svelte/Dockerfile
+    build_context: example/svelte
+    port: 80
+    health_check: true
+
+  - id: headless-combobox-docs
+    hostname: headlesscombobox.chrisvouga.dev
+    github_repo: crvouga/headless-combobox
+    source_code_url: https://github.com/crvouga/headless-combobox
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: todo-app
+    hostname: todo.chrisvouga.dev
+    github_repo: crvouga/todo-v1
+    source_code_url: https://github.com/crvouga/todo-v1
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: image-service
+    hostname: imageservice.chrisvouga.dev
+    github_repo: crvouga/image-service
+    source_code_url: https://github.com/crvouga/image-service
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: connect-four
+    hostname: connectfour.chrisvouga.dev
+    github_repo: crvouga/connect-four
+    source_code_url: https://github.com/crvouga/connect-four
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: anime-blog
+    hostname: anime.chrisvouga.dev
+    github_repo: crvouga/anime
+    source_code_url: https://github.com/crvouga/anime
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: snake-game
+    hostname: snake.chrisvouga.dev
+    github_repo: crvouga/snake
+    source_code_url: https://github.com/crvouga/snake
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: match-three
+    hostname: matchthree.chrisvouga.dev
+    github_repo: crvouga/match-three
+    source_code_url: https://github.com/crvouga/match-three
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true
+
+  - id: simon-says
+    hostname: simonsays.chrisvouga.dev
+    github_repo: crvouga/simon-says
+    source_code_url: https://github.com/crvouga/simon-says
+    dockerfile: ./Dockerfile
+    build_context: .
+    port: 80
+    health_check: true

@@ -1,0 +1,60 @@
+name: Provision node
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "DigitalOcean region"
+        required: false
+        type: string
+        default: nyc3
+      size:
+        description: "Droplet size slug"
+        required: false
+        type: string
+        default: s-4vcpu-8gb
+      skip_if_secrets_exist:
+        description: "Skip if NODE_SSH_HOST secret already exists"
+        required: false
+        type: boolean
+        default: true
+      trigger_deploy:
+        description: "Run deploy-pipeline after provision"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/vault-secrets
+      - run: bun install --frozen-lockfile
+      - name: Install gh CLI
+        run: |
+          type -p curl >/dev/null || sudo apt install curl -y
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
+      - name: Provision DigitalOcean droplet
+        env:
+          SETUP_GITHUB_TOKEN: ${{ env.SETUP_GITHUB_TOKEN }}
+          DIGITALOCEAN_TOKEN: ${{ env.DIGITALOCEAN_TOKEN }}
+        run: |
+          set -euo pipefail
+          ARGS=(--region "${{ inputs.region }}" --size "${{ inputs.size }}")
+          if [ "${{ inputs.skip_if_secrets_exist }}" = "true" ]; then
+            ARGS+=(--skip-if-secrets-exist)
+          fi
+          if [ "${{ inputs.trigger_deploy }}" != "true" ]; then
+            ARGS+=(--no-deploy)
+          fi
+          bun run scripts/provision-droplet.ts "${ARGS[@]}"

@@ -1,0 +1,22 @@
+{
+  "name": "chrisvouga.dev",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "sync-dns": "bun run scripts/sync-dns.ts",
+    "sync-redirects": "bun run scripts/sync-redirects.ts",
+    "sync-secrets": "bun run scripts/sync-secrets.ts",
+    "health-check": "bun run scripts/health-check-urls.ts",
+    "generate-compose": "bun run scripts/generate-compose.ts",
+    "make-ghcr-public": "bun run scripts/make-ghcr-public.ts",
+    "compose-check": "bun run scripts/generate-compose.ts --check",
+    "provision-droplet": "bun run scripts/provision-droplet.ts",
+    "rollout-publish": "bun run scripts/rollout-publish-workflows.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3",
+    "yaml": "^2.8.1"
+  }
+}

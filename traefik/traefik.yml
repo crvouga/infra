@@ -1,0 +1,13 @@
+# HTTP-only origin — Cloudflare terminates TLS at the edge (proxied DNS).
+api:
+  dashboard: false
+
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    endpoint: unix:///var/run/docker.sock
+    exposedByDefault: false
+    network: chrisvouga-web

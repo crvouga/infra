@@ -1,0 +1,2 @@
+# Superseded by: bun run rollout-publish
+# Generates per-repo workflows from services.yaml automatically.

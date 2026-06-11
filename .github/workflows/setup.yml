@@ -1,0 +1,74 @@
+name: Setup
+
+# One-click bootstrap: provision DO droplet (optional) → deploy stack → optional Fly teardown.
+#
+# Vault secrets required: DIGITALOCEAN_TOKEN, SETUP_GITHUB_TOKEN
+
+on:
+  workflow_dispatch:
+    inputs:
+      provision_droplet:
+        description: "Create DO droplet + set NODE_SSH_* secrets (skips if secrets exist)"
+        required: false
+        type: boolean
+        default: true
+      deploy:
+        description: "Run deploy-pipeline after provision"
+        required: false
+        type: boolean
+        default: true
+      decommission_fly:
+        description: "After health-check, trigger portfolio fly-teardown"
+        required: false
+        type: boolean
+        default: false
+      region:
+        description: "DO region (provision only)"
+        required: false
+        type: string
+        default: nyc3
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/vault-secrets
+      - run: bun install --frozen-lockfile
+      - name: Install gh CLI
+        run: |
+          type -p curl >/dev/null || sudo apt install curl -y
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
+      - name: Provision droplet
+        if: ${{ inputs.provision_droplet }}
+        env:
+          SETUP_GITHUB_TOKEN: ${{ env.SETUP_GITHUB_TOKEN }}
+          DIGITALOCEAN_TOKEN: ${{ env.DIGITALOCEAN_TOKEN }}
+        run: |
+          set -euo pipefail
+          bun run scripts/provision-droplet.ts \
+            --region "${{ inputs.region }}" \
+            --skip-if-secrets-exist \
+            --no-deploy
+      - name: Trigger deploy-pipeline
+        if: ${{ inputs.deploy }}
+        env:
+          SETUP_GITHUB_TOKEN: ${{ env.SETUP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="${SETUP_GITHUB_TOKEN}"
+          ARGS=(workflow run deploy-pipeline.yml --repo crvouga/chrisvouga.dev)
+          if [ "${{ inputs.decommission_fly }}" = "true" ]; then
+            ARGS+=(-f run_fly_teardown=true)
+          fi
+          gh "${ARGS[@]}"
+          echo "Deploy pipeline triggered — monitor Actions tab for health-check result"

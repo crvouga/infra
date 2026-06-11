@@ -1,0 +1,265 @@
+name: Deploy Pipeline
+
+# Single-node Docker stack — fully automated via GitHub Actions.
+#
+#   prepare → bootstrap-node → dns-sync → secrets-sync → deploy → health-check → [fly-teardown]
+#
+# Triggers:
+#   - push to main
+#   - repository_dispatch (deploy-service)
+#   - workflow_dispatch
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - ".vscode/**"
+      - ".cursor/**"
+  repository_dispatch:
+    types:
+      - deploy-service
+  workflow_dispatch:
+    inputs:
+      service_id:
+        description: "Single service id (empty = all services)."
+        required: false
+        type: string
+      image_tag:
+        description: "Image tag to deploy. Defaults to latest."
+        required: false
+        type: string
+        default: latest
+      apply_dns:
+        description: "Apply Cloudflare DNS changes."
+        required: false
+        type: boolean
+        default: true
+      run_fly_teardown:
+        description: "After health-check, trigger portfolio fly-teardown."
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+
+env:
+  DEPLOY_DIR: /opt/chrisvouga
+  SERVICE_ID: ${{ github.event.client_payload.id || inputs.service_id || '' }}
+  IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'latest' }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      service_id: ${{ steps.resolve.outputs.service_id }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      health_check_args: ${{ steps.resolve.outputs.health_check_args }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run generate-compose --check
+      - id: resolve
+        run: |
+          set -euo pipefail
+          SID="${SERVICE_ID}"
+          TAG="${IMAGE_TAG}"
+          HC_ARGS=()
+          if [ -n "${SID}" ]; then
+            HC_ARGS+=(--id "${SID}")
+          fi
+          echo "service_id=${SID}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "health_check_args=${HC_ARGS[*]}" >> "$GITHUB_OUTPUT"
+          echo "Deploy: service_id='${SID:-all}' image_tag='${TAG}'"
+
+  make-ghcr-public:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run make-ghcr-public
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bootstrap-node:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rsync stack files to node
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.NODE_SSH_HOST }}
+          username: ${{ secrets.NODE_SSH_USER }}
+          key: ${{ secrets.NODE_SSH_KEY }}
+          source: "docker-compose.yml,traefik,services.yaml,scripts/bootstrap-node.sh,scripts/deploy.sh"
+          target: ${{ env.DEPLOY_DIR }}
+          strip_components: 0
+          overwrite: true
+
+      - name: Bootstrap node
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.NODE_SSH_HOST }}
+          username: ${{ secrets.NODE_SSH_USER }}
+          key: ${{ secrets.NODE_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            chmod +x ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
+            chmod +x ${{ env.DEPLOY_DIR }}/scripts/deploy.sh
+            DEPLOY_DIR=${{ env.DEPLOY_DIR }} ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
+
+  dns-sync:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/vault-secrets
+      - run: bun install --frozen-lockfile
+      - name: Reconcile DNS
+        env:
+          NODE_SSH_HOST: ${{ secrets.NODE_SSH_HOST }}
+          SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
+          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
+          if [ -n "${SERVICE_ID}" ]; then ARGS+=(--id "${SERVICE_ID}"); fi
+          bun run sync-dns "${ARGS[@]}"
+      - name: Ensure apex redirect
+        env:
+          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
+          bun run sync-redirects "${ARGS[@]}"
+
+  secrets-sync:
+    runs-on: ubuntu-latest
+    needs: [prepare, bootstrap-node]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/vault-secrets
+      - run: bun install --frozen-lockfile
+      - name: Write service env files
+        run: |
+          set -euo pipefail
+          mkdir -p env
+          ARGS=(--output-dir env)
+          if [ -n "${{ needs.prepare.outputs.service_id }}" ]; then
+            ARGS+=(--id "${{ needs.prepare.outputs.service_id }}")
+          fi
+          bun run sync-secrets "${ARGS[@]}"
+      - name: Write node runtime .env
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "IMAGE_TAG=${IMAGE_TAG}" > node.env
+      - name: Upload env files to node
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.NODE_SSH_HOST }}
+          username: ${{ secrets.NODE_SSH_USER }}
+          key: ${{ secrets.NODE_SSH_KEY }}
+          source: "env,node.env"
+          target: ${{ env.DEPLOY_DIR }}
+          overwrite: true
+      - name: Place runtime .env on node
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.NODE_SSH_HOST }}
+          username: ${{ secrets.NODE_SSH_USER }}
+          key: ${{ secrets.NODE_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            mv ${{ env.DEPLOY_DIR }}/node.env ${{ env.DEPLOY_DIR }}/.env
+            mkdir -p ${{ env.DEPLOY_DIR }}/env
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [prepare, bootstrap-node, dns-sync, secrets-sync]
+    if: >-
+      ${{
+        needs.dns-sync.result == 'success'
+        && needs.secrets-sync.result == 'success'
+      }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Deploy stack
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.NODE_SSH_HOST }}
+          username: ${{ secrets.NODE_SSH_USER }}
+          key: ${{ secrets.NODE_SSH_KEY }}
+          script_stop: true
+          envs: IMAGE_TAG
+          script: |
+            set -euo pipefail
+            export IMAGE_TAG="${{ needs.prepare.outputs.image_tag }}"
+            cd ${{ env.DEPLOY_DIR }}
+            if [ -f .env ]; then set -a; source .env; set +a; fi
+            SERVICE_ID="${{ needs.prepare.outputs.service_id }}"
+            bash scripts/deploy.sh "${SERVICE_ID}"
+
+  health-check:
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy]
+    if: ${{ needs.deploy.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Health-check services
+        run: |
+          set -euo pipefail
+          ARGS=(${{ needs.prepare.outputs.health_check_args }})
+          bun run health-check "${ARGS[@]}"
+
+  fly-teardown:
+    runs-on: ubuntu-latest
+    needs: health-check
+    if: >-
+      ${{
+        needs.health-check.result == 'success'
+        && github.event_name == 'workflow_dispatch'
+        && inputs.run_fly_teardown == true
+      }}
+    steps:
+      - uses: ./.github/actions/vault-secrets
+      - name: Install gh CLI
+        run: |
+          type -p curl >/dev/null || sudo apt install curl -y
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
+      - name: Trigger portfolio fly-teardown
+        env:
+          SETUP_GITHUB_TOKEN: ${{ env.SETUP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="${SETUP_GITHUB_TOKEN}"
+          gh workflow run fly-teardown.yml --repo crvouga/portfolio \
+            -f max_teardowns_per_run=15 \
+            -f force_teardown=true
