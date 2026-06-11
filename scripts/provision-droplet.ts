@@ -97,6 +97,58 @@ async function findDropletByName(token: string, name: string): Promise<Droplet |
   return data.droplets.find((d) => d.name === name) ?? null;
 }
 
+async function deleteDroplet(token: string, id: number): Promise<void> {
+  await doFetch(token, "DELETE", `/droplets/${id}`);
+}
+
+type DoSshKey = {
+  id: number;
+  fingerprint: string;
+  public_key: string;
+  name: string;
+};
+
+async function ensureDoSshKey(
+  token: string,
+  name: string,
+  publicKey: string,
+): Promise<string> {
+  const data = await doFetch<{ ssh_keys: DoSshKey[] }>(token, "GET", "/account/keys");
+  const match =
+    data.ssh_keys.find((k) => k.public_key.trim() === publicKey.trim()) ??
+    data.ssh_keys.find((k) => k.name === name);
+  if (match) return match.fingerprint;
+
+  const created = await doFetch<{ ssh_key: { fingerprint: string } }>(
+    token,
+    "POST",
+    "/account/keys",
+    { name, public_key: publicKey },
+  );
+  return created.ssh_key.fingerprint;
+}
+
+async function waitForSsh(keyPath: string, ip: string): Promise<void> {
+  const maxAttempts = 60;
+  let lastError = "";
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await $`ssh -i ${keyPath} -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes root@${ip} echo ok`.quiet();
+      return;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      const elapsed = (i + 1) * 10;
+      if (i === 0 || (i + 1) % 6 === 0) {
+        console.log(`  SSH not ready yet (${elapsed}s)...`);
+      }
+      if (i === maxAttempts - 1) {
+        throw new Error(`SSH never became available after ${elapsed}s: ${lastError}`);
+      }
+      await Bun.sleep(10_000);
+    }
+  }
+}
+
 async function waitForDropletActive(token: string, id: number): Promise<Droplet> {
   for (let i = 0; i < 60; i++) {
     const data = await doFetch<{ droplet: Droplet }>(token, "GET", `/droplets/${id}`);
@@ -150,18 +202,41 @@ async function main(): Promise<void> {
     }
   }
 
+  const sshSecretsExist = await ghSecretExists("NODE_SSH_HOST", ghToken);
   const existing = await findDropletByName(doToken, DROPLET_NAME);
   if (existing) {
     const ip = existing.networks.v4.find((n) => n.type === "public")?.ip_address;
     console.log(`Droplet "${DROPLET_NAME}" already exists (id=${existing.id}, ip=${ip})`);
     if (!ip) throw new Error("Existing droplet has no public IP");
-    if (!args.dryRun && process.env["NODE_SSH_PRIVATE_KEY"]?.trim()) {
+
+    if (sshSecretsExist) {
+      console.log("NODE_SSH_HOST secret already set — reusing existing droplet");
+      return;
+    }
+
+    const privateKeyFromEnv = process.env["NODE_SSH_PRIVATE_KEY"]?.trim();
+    if (!args.dryRun && privateKeyFromEnv) {
       console.log("Re-using existing droplet — updating NODE_SSH_* secrets from env");
       await ghSecretSet("NODE_SSH_HOST", ip, ghToken);
       await ghSecretSet("NODE_SSH_USER", "root", ghToken);
-      await ghSecretSet("NODE_SSH_KEY", process.env["NODE_SSH_PRIVATE_KEY"].trim(), ghToken);
+      await ghSecretSet("NODE_SSH_KEY", privateKeyFromEnv, ghToken);
+      return;
     }
-    return;
+
+    if (args.dryRun) {
+      console.log("[dry-run] Would delete orphaned droplet and recreate with new SSH key");
+      return;
+    }
+
+    console.log(
+      "Orphaned droplet found (no NODE_SSH_* secrets) — deleting and recreating with a registered DO SSH key",
+    );
+    await deleteDroplet(doToken, existing.id);
+    for (let i = 0; i < 30; i++) {
+      const stillThere = await findDropletByName(doToken, DROPLET_NAME);
+      if (!stillThere) break;
+      await Bun.sleep(5_000);
+    }
   }
 
   const workDir = join(tmpdir(), `chrisvouga-provision-${Date.now()}`);
@@ -179,18 +254,17 @@ async function main(): Promise<void> {
   const pubKey = readFileSync(pubPath, "utf8").trim();
   const privateKey = readFileSync(keyPath, "utf8");
 
+  const sshFingerprint = await ensureDoSshKey(
+    doToken,
+    `chrisvouga-origin-${new Date().toISOString().slice(0, 10)}`,
+    pubKey,
+  );
+
+  // DO injects ssh_keys at boot; install Docker in the background so SSH is ready immediately.
   const userData = `#!/bin/bash
 set -euo pipefail
-mkdir -p /root/.ssh
-chmod 700 /root/.ssh
-grep -qF '${pubKey}' /root/.ssh/authorized_keys 2>/dev/null || echo '${pubKey}' >> /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys
-curl -fsSL https://get.docker.com | sh
-systemctl enable docker
-systemctl start docker
+nohup bash -c 'curl -fsSL https://get.docker.com | sh && systemctl enable docker && systemctl start docker' >/var/log/docker-install.log 2>&1 &
 `;
-
-  writeFileSync(join(workDir, "user-data.sh"), userData);
 
   const createBody = {
     name: DROPLET_NAME,
@@ -200,6 +274,7 @@ systemctl start docker
     ipv6: false,
     monitoring: true,
     tags: ["chrisvouga", "origin"],
+    ssh_keys: [sshFingerprint],
     user_data: userData,
   };
 
@@ -216,16 +291,9 @@ systemctl start docker
   if (!ip) throw new Error("No public IP on new droplet");
 
   console.log(`Droplet active: ${ip}`);
-  console.log("Waiting for SSH...");
-  for (let i = 0; i < 30; i++) {
-    try {
-      await $`ssh -i ${keyPath} -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@${ip} echo ok`.quiet();
-      break;
-    } catch {
-      if (i === 29) throw new Error("SSH never became available");
-      await Bun.sleep(10_000);
-    }
-  }
+  console.log("Waiting for SSH (DO-injected key, up to 10 min)...");
+  await waitForSsh(keyPath, ip);
+  console.log("SSH ready");
 
   console.log("Setting GitHub secrets...");
   await ghSecretSet("NODE_SSH_HOST", ip, ghToken);
