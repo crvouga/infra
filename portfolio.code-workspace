@@ -1,12 +1,18 @@
 {
-	"folders": [
-		{
-			"path": "../portfolio"
-		},
-		{
-			"name": "chrisvouga.dev",
-			"path": "."
-		}
-	],
-	"settings": {}
+  "folders": [
+    {
+      "path": "../portfolio",
+    },
+    {
+      "name": "chrisvouga.dev",
+      "path": ".",
+    },
+    {
+      "path": "../turborepo-remote-cache",
+    },
+    {
+      "path": "../vault",
+    },
+  ],
+  "settings": {},
 }
