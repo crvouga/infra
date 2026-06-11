@@ -18,7 +18,7 @@ export async function vaultKvPatch(fields: Record<string, string>): Promise<void
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${vaultToken()}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/merge-patch+json",
     },
     body: JSON.stringify({ data: fields }),
   });
