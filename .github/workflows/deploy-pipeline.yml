@@ -246,7 +246,7 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           sudo apt update
           sudo apt install gh -y
-      - name: Tear down orphan Fly apps (idempotent)
+      - name: Tear down migrated Fly apps (idempotent)
         env:
           GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
         run: |
@@ -254,7 +254,8 @@ jobs:
           export GH_TOKEN="${GITHUB_TOKEN_SUPER}"
           BEFORE="$(gh run list --workflow=fly-teardown.yml --repo crvouga/portfolio --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           gh workflow run fly-teardown.yml --repo crvouga/portfolio \
-            -f max_teardowns_per_run=15 \
+            -f mode=known \
+            -f max_teardowns_per_run=20 \
             -f force_teardown=true
           RUN_ID=""
           for _ in $(seq 1 30); do
@@ -269,4 +270,4 @@ jobs:
             exit 1
           fi
           gh run watch "${RUN_ID}" --repo crvouga/portfolio --exit-status
-          echo "Fly teardown complete (no-op when all chrisvouga-* Fly apps are already gone)"
+          echo "Fly teardown complete (destroys chrisvouga-* apps in projects.ts; vault-chrisvouga is protected)"
