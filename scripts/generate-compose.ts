@@ -27,6 +27,7 @@ function traefikLabels(service: ServiceSpec): string {
       - traefik.enable=true
       - traefik.http.routers.${router}.rule=Host(\`${service.hostname}\`)
       - traefik.http.routers.${router}.entrypoints=web
+      - traefik.http.routers.${router}.middlewares=cfproto@docker
       - traefik.http.services.${router}.loadbalancer.server.port=${service.port}`;
 }
 
@@ -82,6 +83,9 @@ services:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
     networks:
       - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.cfproto.headers.customrequestheaders.X-Forwarded-Proto=https
 
 ${servicesYaml}`;
 }

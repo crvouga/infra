@@ -20,6 +20,9 @@ services:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
     networks:
       - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.cfproto.headers.customrequestheaders.X-Forwarded-Proto=https
 
   portfolio:
     image: ghcr.io/crvouga/chrisvouga-portfolio:${IMAGE_TAG:-latest}
@@ -30,6 +33,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.portfolio.rule=Host(`www.chrisvouga.dev`)
       - traefik.http.routers.portfolio.entrypoints=web
+      - traefik.http.routers.portfolio.middlewares=cfproto@docker
       - traefik.http.services.portfolio.loadbalancer.server.port=80
 
   pickflix:
@@ -45,6 +49,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.pickflix.rule=Host(`pickflix.chrisvouga.dev`)
       - traefik.http.routers.pickflix.entrypoints=web
+      - traefik.http.routers.pickflix.middlewares=cfproto@docker
       - traefik.http.services.pickflix.loadbalancer.server.port=9000
 
   moviefinder-app-rust:
@@ -60,6 +65,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.moviefinderapprust.rule=Host(`moviefinder-app-rust.chrisvouga.dev`)
       - traefik.http.routers.moviefinderapprust.entrypoints=web
+      - traefik.http.routers.moviefinderapprust.middlewares=cfproto@docker
       - traefik.http.services.moviefinderapprust.loadbalancer.server.port=3000
 
   moviefinder-app-go:
@@ -75,6 +81,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.moviefinderappgo.rule=Host(`moviefinder-app-go.chrisvouga.dev`)
       - traefik.http.routers.moviefinderappgo.entrypoints=web
+      - traefik.http.routers.moviefinderappgo.middlewares=cfproto@docker
       - traefik.http.services.moviefinderappgo.loadbalancer.server.port=8080
 
   moviefinder-app-react:
@@ -90,6 +97,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.moviefinderappreact.rule=Host(`moviefinder-app-react.chrisvouga.dev`)
       - traefik.http.routers.moviefinderappreact.entrypoints=web
+      - traefik.http.routers.moviefinderappreact.middlewares=cfproto@docker
       - traefik.http.services.moviefinderappreact.loadbalancer.server.port=3000
 
   moviefinder-app-clojurescript:
@@ -105,6 +113,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.moviefinderappclojurescript.rule=Host(`moviefinder-app-clojurescript.chrisvouga.dev`)
       - traefik.http.routers.moviefinderappclojurescript.entrypoints=web
+      - traefik.http.routers.moviefinderappclojurescript.middlewares=cfproto@docker
       - traefik.http.services.moviefinderappclojurescript.loadbalancer.server.port=9630
 
   headless-combobox-svelte-example:
@@ -114,8 +123,9 @@ services:
       - web
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headlesscomboboxsvelteexample.rule=Host(`svelte.headlesscombobox.chrisvouga.dev`)
+      - traefik.http.routers.headlesscomboboxsvelteexample.rule=Host(`svelte-headlesscombobox.chrisvouga.dev`)
       - traefik.http.routers.headlesscomboboxsvelteexample.entrypoints=web
+      - traefik.http.routers.headlesscomboboxsvelteexample.middlewares=cfproto@docker
       - traefik.http.services.headlesscomboboxsvelteexample.loadbalancer.server.port=80
 
   headless-combobox-docs:
@@ -127,6 +137,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.headlesscomboboxdocs.rule=Host(`headlesscombobox.chrisvouga.dev`)
       - traefik.http.routers.headlesscomboboxdocs.entrypoints=web
+      - traefik.http.routers.headlesscomboboxdocs.middlewares=cfproto@docker
       - traefik.http.services.headlesscomboboxdocs.loadbalancer.server.port=80
 
   todo-app:
@@ -138,6 +149,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.todoapp.rule=Host(`todo.chrisvouga.dev`)
       - traefik.http.routers.todoapp.entrypoints=web
+      - traefik.http.routers.todoapp.middlewares=cfproto@docker
       - traefik.http.services.todoapp.loadbalancer.server.port=80
 
   image-service:
@@ -149,6 +161,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.imageservice.rule=Host(`imageservice.chrisvouga.dev`)
       - traefik.http.routers.imageservice.entrypoints=web
+      - traefik.http.routers.imageservice.middlewares=cfproto@docker
       - traefik.http.services.imageservice.loadbalancer.server.port=80
 
   connect-four:
@@ -160,6 +173,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.connectfour.rule=Host(`connectfour.chrisvouga.dev`)
       - traefik.http.routers.connectfour.entrypoints=web
+      - traefik.http.routers.connectfour.middlewares=cfproto@docker
       - traefik.http.services.connectfour.loadbalancer.server.port=80
 
   anime-blog:
@@ -171,6 +185,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.animeblog.rule=Host(`anime.chrisvouga.dev`)
       - traefik.http.routers.animeblog.entrypoints=web
+      - traefik.http.routers.animeblog.middlewares=cfproto@docker
       - traefik.http.services.animeblog.loadbalancer.server.port=80
 
   snake-game:
@@ -182,6 +197,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.snakegame.rule=Host(`snake.chrisvouga.dev`)
       - traefik.http.routers.snakegame.entrypoints=web
+      - traefik.http.routers.snakegame.middlewares=cfproto@docker
       - traefik.http.services.snakegame.loadbalancer.server.port=80
 
   match-three:
@@ -193,6 +209,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.matchthree.rule=Host(`matchthree.chrisvouga.dev`)
       - traefik.http.routers.matchthree.entrypoints=web
+      - traefik.http.routers.matchthree.middlewares=cfproto@docker
       - traefik.http.services.matchthree.loadbalancer.server.port=80
 
   simon-says:
@@ -204,4 +221,5 @@ services:
       - traefik.enable=true
       - traefik.http.routers.simonsays.rule=Host(`simonsays.chrisvouga.dev`)
       - traefik.http.routers.simonsays.entrypoints=web
+      - traefik.http.routers.simonsays.middlewares=cfproto@docker
       - traefik.http.services.simonsays.loadbalancer.server.port=80

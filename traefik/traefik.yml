@@ -5,6 +5,9 @@ api:
 entryPoints:
   web:
     address: ":80"
+    # Cloudflare Flexible terminates TLS; preserve CF X-Forwarded-Proto for apps (e.g. pickflix ensureHttps).
+    forwardedHeaders:
+      insecure: true
 
 providers:
   docker:

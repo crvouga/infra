@@ -182,7 +182,7 @@ Open each hostname in a browser:
 | MovieFinder (React) | https://moviefinder-app-react.chrisvouga.dev |
 | MovieFinder (CLJS) | https://moviefinder-app-clojurescript.chrisvouga.dev |
 | Headless Combobox docs | https://headlesscombobox.chrisvouga.dev |
-| Headless Combobox Svelte | https://svelte.headlesscombobox.chrisvouga.dev |
+| Headless Combobox Svelte | https://svelte-headlesscombobox.chrisvouga.dev |
 | Todo | https://todo.chrisvouga.dev |
 | Image service | https://imageservice.chrisvouga.dev |
 | Connect Four | https://connectfour.chrisvouga.dev |

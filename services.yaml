@@ -110,7 +110,7 @@ services:
     secrets: *moviefinder_secrets
 
   - id: headless-combobox-svelte-example
-    hostname: svelte.headlesscombobox.chrisvouga.dev
+    hostname: svelte-headlesscombobox.chrisvouga.dev
     github_repo: crvouga/headless-combobox
     source_code_url: https://github.com/crvouga/headless-combobox
     dockerfile: example/svelte/Dockerfile
