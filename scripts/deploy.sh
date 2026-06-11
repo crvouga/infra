@@ -28,6 +28,7 @@ EOF
   docker compose pull "${COMPOSE_SERVICE}"
   echo "==> Up ${COMPOSE_SERVICE}"
   docker compose up -d "${COMPOSE_SERVICE}"
+  docker compose logs --tail=40 "${COMPOSE_SERVICE}" 2>&1 || true
 else
   rm -f docker-compose.override.yml
   export IMAGE_TAG
