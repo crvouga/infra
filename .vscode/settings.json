@@ -1,9 +1,13 @@
 {
   "cSpell.words": [
+    "animeblog",
+    "cfproto",
     "chrisvouga",
     "clojurescript",
     "connectfour",
+    "customrequestheaders",
     "headlesscombobox",
+    "headlesscomboboxdocs",
     "headlesscomboboxsvelteexample",
     "imageservice",
     "matchthree",
@@ -14,6 +18,8 @@
     "moviefinderapprust",
     "pickflix",
     "simonsays",
-    "TMDB"
+    "snakegame",
+    "TMDB",
+    "todoapp"
   ]
 }
