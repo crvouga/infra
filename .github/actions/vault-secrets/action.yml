@@ -1,5 +1,10 @@
 name: Vault secrets (OIDC)
 description: Authenticate to OpenBao via GitHub OIDC and export pipeline secrets
+inputs:
+  allow_missing_node_ssh:
+    description: "Skip failure when CHRISVOUGA_DEV_NODE_SSH_* are absent (Setup / Provision node)"
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -20,7 +25,29 @@ runs:
           secret/data/personal/prd TWILIO_AUTH_TOKEN | TWILIO_AUTH_TOKEN ;
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
           secret/data/personal/prd DIGITALOCEAN_TOKEN | DIGITALOCEAN_TOKEN ;
-          secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER ;
+          secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER
+    - if: ${{ inputs.allow_missing_node_ssh == 'true' }}
+      uses: hashicorp/vault-action@v3
+      with:
+        url: https://vault-chrisvouga.fly.dev
+        method: jwt
+        path: jwt
+        role: github-actions
+        jwtGithubAudience: https://vault.chrisvouga.dev
+        ignoreNotFound: true
+        secrets: |
+          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_HOST | CHRISVOUGA_DEV_NODE_SSH_HOST ;
+          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_USER | CHRISVOUGA_DEV_NODE_SSH_USER ;
+          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_KEY | CHRISVOUGA_DEV_NODE_SSH_KEY
+    - if: ${{ inputs.allow_missing_node_ssh != 'true' }}
+      uses: hashicorp/vault-action@v3
+      with:
+        url: https://vault-chrisvouga.fly.dev
+        method: jwt
+        path: jwt
+        role: github-actions
+        jwtGithubAudience: https://vault.chrisvouga.dev
+        secrets: |
           secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_HOST | CHRISVOUGA_DEV_NODE_SSH_HOST ;
           secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_USER | CHRISVOUGA_DEV_NODE_SSH_USER ;
           secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_KEY | CHRISVOUGA_DEV_NODE_SSH_KEY

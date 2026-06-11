@@ -13,6 +13,7 @@
     "make-ghcr-public": "bun run scripts/make-ghcr-public.ts",
     "compose-check": "bun run scripts/generate-compose.ts --check",
     "provision-droplet": "bun run scripts/provision-droplet.ts",
+    "migrate-node-ssh-to-vault": "bun run scripts/migrate-node-ssh-to-vault.ts",
     "rollout-publish": "bun run scripts/rollout-publish-workflows.ts"
   },
   "devDependencies": {
