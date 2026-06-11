@@ -9,7 +9,7 @@
 
 Self-hosted Turborepo Remote Cache on Fly.io (Docker + Bun). Artifacts live in Backblaze B2 via `@pkgs/object-store` (`ObjectStoreImplS3`). Only `VAULT_TOKEN` is a Fly secret; B2 creds and `TURBO_TOKEN` load from Vault at boot.
 
-CI publishes a **public** image to **GHCR** (`ghcr.io/crvouga/turborepo-remote-cache:<sha>`); deploy uses `fly deploy --image` with no mirror to `registry.fly.io`.
+CI publishes a **public** image to **GHCR** (`ghcr.io/crvouga/turborepo-remote-cache:<sha>`); deploy uses `fly deploy --image` with no mirror to `registry.fly.io`. If the package is new, set GHCR visibility to public once in GitHub package settings (GITHUB_TOKEN often cannot change this via API).
 
 ## Vault secrets (source of truth)
 

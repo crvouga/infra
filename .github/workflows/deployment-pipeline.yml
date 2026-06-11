@@ -108,7 +108,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -119,13 +119,36 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-      - name: Set GHCR package visibility to public
-        run: |
-          gh api --method PATCH \
-            "/users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}" \
-            -f visibility=public
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      - name: Ensure GHCR image is publicly pullable
         env:
           GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          PACKAGE: ${{ github.event.repository.name }}
+          OWNER: ${{ github.repository_owner }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+        run: |
+          set +e
+          if [ "$OWNER_TYPE" = "Organization" ]; then
+            gh api --method PATCH "/orgs/${OWNER}/packages/container/${PACKAGE}" \
+              -f visibility=public
+          else
+            gh api --method PATCH "/user/packages/container/${PACKAGE}" \
+              -f visibility=public
+          fi
+          set -e
+
+          docker logout ghcr.io 2>/dev/null || true
+          if docker pull "$IMAGE"; then
+            echo "GHCR image is publicly pullable."
+            exit 0
+          fi
+
+          echo "::error::GHCR image is not public. GITHUB_TOKEN cannot always change package visibility."
+          echo "Open https://github.com/${OWNER}/${PACKAGE}/pkgs/container/${PACKAGE}/settings"
+          echo "Set Package visibility to Public, then re-run the deploy workflow."
+          exit 1
       - name: Setup flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy to Fly.io

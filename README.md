@@ -77,7 +77,7 @@ The deploy job is fully automated from Vault:
 4. Upserts Cloudflare DNS records from `fly certs setup` (DNS-only, no manual steps)
 5. Deploys the public GHCR image (`fly deploy --image ghcr.io/...`)
 
-CI builds, pushes to GHCR, and sets package visibility to public so Fly can pull without registry credentials.
+CI builds and pushes to GHCR, then verifies the image is anonymously pullable (Fly needs a public package). GitHub may require a one-time manual step: open the package settings and set visibility to **Public**.
 
 CI authenticates via GitHub OIDC (`hashicorp/vault-action`); no GitHub repo secrets required.
 
