@@ -26,7 +26,7 @@ append_search_path() {
 
 export BAO_PG_CONNECTION_URL="$(append_search_path "$DB_CONNECTION_URI")"
 
-if [ -n "${FLY_APP_NAME:-}" ]; then
+if [ -z "${BAO_API_ADDR:-}" ] && [ -n "${FLY_APP_NAME:-}" ]; then
   export BAO_API_ADDR="https://${FLY_APP_NAME}.fly.dev"
 fi
 

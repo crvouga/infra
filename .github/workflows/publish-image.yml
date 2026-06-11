@@ -1,0 +1,25 @@
+name: Publish image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - docker-entrypoint.sh
+      - config/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    uses: crvouga/chrisvouga.dev/.github/workflows/reusable-publish-image.yml@main
+    secrets:
+      DEPLOY_DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+    with:
+      service_id: vault
+      dockerfile: ./Dockerfile
+      context: .
