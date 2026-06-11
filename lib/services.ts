@@ -3,6 +3,7 @@ import { parse as parseYaml } from "yaml";
 
 export type SecretSource =
   | { readonly source: "vault" }
+  | { readonly source: "github" }
   | { readonly source: "literal"; readonly value: string };
 
 export type SecretSpec = {
