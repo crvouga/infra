@@ -7,7 +7,7 @@
  *   bun run scripts/health-check-urls.ts --id snake-game
  *   bun run scripts/health-check-urls.ts --retries 5 --timeout-ms 30000
  */
-import { findService, loadServicesConfig } from "../lib/services.js";
+import { findService, isPublicService, loadServicesConfig } from "../lib/services.js";
 
 type Args = {
   readonly ids: readonly string[];
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const config = loadServicesConfig();
   const services = config.services.filter((s) => {
-    if (!s.health_check) return false;
+    if (!s.health_check || !isPublicService(s) || !s.hostname) return false;
     if (args.ids.length === 0) return true;
     return args.ids.includes(s.id);
   });

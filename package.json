@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit",
     "sync-dns": "bun run scripts/sync-dns.ts",
     "sync-redirects": "bun run scripts/sync-redirects.ts",
+    "sync-aliases": "bun run scripts/sync-aliases.ts",
     "sync-secrets": "bun run scripts/sync-secrets.ts",
     "health-check": "bun run scripts/health-check-urls.ts",
     "generate-compose": "bun run scripts/generate-compose.ts",

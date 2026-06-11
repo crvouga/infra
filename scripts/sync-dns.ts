@@ -14,7 +14,7 @@
  *   bun run scripts/sync-dns.ts --id pickflix --apply
  */
 import { CloudflareApi, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
-import { loadServicesConfig, type ServiceSpec } from "../lib/services.js";
+import { loadServicesConfig, isPublicService, type ServiceSpec } from "../lib/services.js";
 
 type Args = {
   readonly ids: readonly string[];
@@ -144,6 +144,7 @@ async function planActions(
   }
 
   for (const service of services) {
+    if (!isPublicService(service) || !service.hostname) continue;
     desiredNames.add(service.hostname);
     const existing = byName.get(service.hostname) ?? [];
     const cnames = existing.filter((r) => r.type === "CNAME");

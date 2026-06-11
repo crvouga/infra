@@ -146,6 +146,14 @@ jobs:
           ARGS=()
           if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
           bun run sync-redirects "${ARGS[@]}"
+      - name: Ensure domain aliases
+        env:
+          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
+          bun run sync-aliases "${ARGS[@]}"
 
   secrets-sync:
     runs-on: ubuntu-latest

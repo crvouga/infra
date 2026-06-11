@@ -13,6 +13,11 @@
     {
       "path": "../vault",
     },
+    {
+      "path": "../normalizer.app-1",
+    },
   ],
-  "settings": {},
+  "settings": {
+    "cSpell.words": ["sealedcode"],
+  },
 }

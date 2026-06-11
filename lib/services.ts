@@ -10,14 +10,24 @@ export type SecretSpec = {
   readonly name: string;
 } & SecretSource;
 
+export type AliasSpec = {
+  readonly zone: string;
+  readonly hosts: readonly string[];
+  readonly target: string;
+};
+
 export type ServiceSpec = {
   readonly id: string;
-  readonly hostname: string;
+  /** Public hostname; required unless `internal: true`. */
+  readonly hostname?: string;
+  /** No Traefik routing, DNS, or public URL — queue consumers, etc. */
+  readonly internal?: boolean;
   readonly github_repo: string;
   readonly source_code_url: string;
   readonly dockerfile: string;
   readonly build_context: string;
-  readonly port: number;
+  /** Traefik backend port; required for public services. */
+  readonly port?: number;
   readonly health_check: boolean;
   /** Health-check path (default `/`). */
   readonly health_path?: string;
@@ -33,8 +43,13 @@ export type ServicesConfig = {
   readonly image_owner: string;
   readonly default_image_tag: string;
   readonly skip_rollout_repos?: readonly string[];
+  readonly aliases?: readonly AliasSpec[];
   readonly services: readonly ServiceSpec[];
 };
+
+export function isPublicService(service: ServiceSpec): boolean {
+  return service.internal !== true;
+}
 
 export function imageRepo(config: ServicesConfig, id: string): string {
   return `ghcr.io/${config.image_owner}/chrisvouga-${id}`;
@@ -55,6 +70,18 @@ export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
     }
     if (!service.dockerfile || service.build_context === undefined) {
       throw new Error(`Service "${service.id}" missing dockerfile or build_context`);
+    }
+    if (service.internal) {
+      if (service.hostname) {
+        throw new Error(`Service "${service.id}" is internal but has hostname`);
+      }
+    } else {
+      if (!service.hostname) {
+        throw new Error(`Service "${service.id}" missing hostname`);
+      }
+      if (service.port == null) {
+        throw new Error(`Service "${service.id}" missing port`);
+      }
     }
   }
   return raw;

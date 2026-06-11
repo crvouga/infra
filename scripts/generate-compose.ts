@@ -10,6 +10,7 @@ import { writeFileSync, readFileSync } from "node:fs";
 import {
   composeServiceName,
   imageRepo,
+  isPublicService,
   loadServicesConfig,
   type ServiceSpec,
   type ServicesConfig,
@@ -52,14 +53,14 @@ function serviceBlock(
     service.depends_on && service.depends_on.length > 0
       ? `    depends_on:\n${service.depends_on.map((d) => `      - ${composeServiceName(d)}`).join("\n")}\n`
       : "";
+  const routing = isPublicService(service) ? traefikLabels(service) : "";
 
   return `  ${name}:
     image: ${image}:\${IMAGE_TAG:-${config.default_image_tag}}
     restart: unless-stopped
     networks:
       - web
-${envFile}${environment}${dependsOn}${traefikLabels(service)}
-`;
+${envFile}${environment}${dependsOn}${routing}`;
 }
 
 function generate(): string {

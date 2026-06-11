@@ -24,7 +24,16 @@ runs:
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
           secret/data/personal/prd DIGITALOCEAN_TOKEN | DIGITALOCEAN_TOKEN ;
           secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER ;
-          secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN
+          secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN ;
+          secret/data/personal/prd DATABASE_URL | DATABASE_URL ;
+          secret/data/personal/prd S3_ENDPOINT | S3_ENDPOINT ;
+          secret/data/personal/prd S3_ACCESS_KEY | S3_ACCESS_KEY ;
+          secret/data/personal/prd S3_SECRET_KEY | S3_SECRET_KEY ;
+          secret/data/personal/prd S3_BUCKET | S3_BUCKET ;
+          secret/data/personal/prd OPENAI_API_KEY | OPENAI_API_KEY ;
+          secret/data/personal/prd OBJECT_STORE_PRESIGNED_URL_SECRET | OBJECT_STORE_PRESIGNED_URL_SECRET ;
+          secret/data/personal/prd GOOGLE_CLIENT_ID | GOOGLE_CLIENT_ID ;
+          secret/data/personal/prd GOOGLE_CLIENT_SECRET | GOOGLE_CLIENT_SECRET
     - if: ${{ inputs.allow_missing_node_ssh != 'true' }}
       uses: hashicorp/vault-action@v3
       with:

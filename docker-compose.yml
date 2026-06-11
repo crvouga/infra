@@ -35,7 +35,6 @@ services:
       - traefik.http.routers.portfolio.entrypoints=web
       - traefik.http.routers.portfolio.middlewares=cfproto@docker
       - traefik.http.services.portfolio.loadbalancer.server.port=80
-
   pickflix:
     image: ghcr.io/crvouga/chrisvouga-pickflix:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -51,7 +50,6 @@ services:
       - traefik.http.routers.pickflix.entrypoints=web
       - traefik.http.routers.pickflix.middlewares=cfproto@docker
       - traefik.http.services.pickflix.loadbalancer.server.port=9000
-
   moviefinder-app-rust:
     image: ghcr.io/crvouga/chrisvouga-moviefinder-app-rust:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -67,7 +65,6 @@ services:
       - traefik.http.routers.moviefinderapprust.entrypoints=web
       - traefik.http.routers.moviefinderapprust.middlewares=cfproto@docker
       - traefik.http.services.moviefinderapprust.loadbalancer.server.port=3000
-
   moviefinder-app-go:
     image: ghcr.io/crvouga/chrisvouga-moviefinder-app-go:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -83,7 +80,6 @@ services:
       - traefik.http.routers.moviefinderappgo.entrypoints=web
       - traefik.http.routers.moviefinderappgo.middlewares=cfproto@docker
       - traefik.http.services.moviefinderappgo.loadbalancer.server.port=8080
-
   moviefinder-app-react:
     image: ghcr.io/crvouga/chrisvouga-moviefinder-app-react:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -99,7 +95,6 @@ services:
       - traefik.http.routers.moviefinderappreact.entrypoints=web
       - traefik.http.routers.moviefinderappreact.middlewares=cfproto@docker
       - traefik.http.services.moviefinderappreact.loadbalancer.server.port=3000
-
   moviefinder-app-clojurescript:
     image: ghcr.io/crvouga/chrisvouga-moviefinder-app-clojurescript:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -115,7 +110,6 @@ services:
       - traefik.http.routers.moviefinderappclojurescript.entrypoints=web
       - traefik.http.routers.moviefinderappclojurescript.middlewares=cfproto@docker
       - traefik.http.services.moviefinderappclojurescript.loadbalancer.server.port=9630
-
   headless-combobox-svelte-example:
     image: ghcr.io/crvouga/chrisvouga-headless-combobox-svelte-example:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -127,7 +121,6 @@ services:
       - traefik.http.routers.headlesscomboboxsvelteexample.entrypoints=web
       - traefik.http.routers.headlesscomboboxsvelteexample.middlewares=cfproto@docker
       - traefik.http.services.headlesscomboboxsvelteexample.loadbalancer.server.port=80
-
   headless-combobox-docs:
     image: ghcr.io/crvouga/chrisvouga-headless-combobox-docs:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -139,7 +132,6 @@ services:
       - traefik.http.routers.headlesscomboboxdocs.entrypoints=web
       - traefik.http.routers.headlesscomboboxdocs.middlewares=cfproto@docker
       - traefik.http.services.headlesscomboboxdocs.loadbalancer.server.port=80
-
   todo-app:
     image: ghcr.io/crvouga/chrisvouga-todo-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -151,7 +143,6 @@ services:
       - traefik.http.routers.todoapp.entrypoints=web
       - traefik.http.routers.todoapp.middlewares=cfproto@docker
       - traefik.http.services.todoapp.loadbalancer.server.port=80
-
   image-service:
     image: ghcr.io/crvouga/chrisvouga-image-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -163,7 +154,6 @@ services:
       - traefik.http.routers.imageservice.entrypoints=web
       - traefik.http.routers.imageservice.middlewares=cfproto@docker
       - traefik.http.services.imageservice.loadbalancer.server.port=80
-
   connect-four:
     image: ghcr.io/crvouga/chrisvouga-connect-four:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -175,7 +165,6 @@ services:
       - traefik.http.routers.connectfour.entrypoints=web
       - traefik.http.routers.connectfour.middlewares=cfproto@docker
       - traefik.http.services.connectfour.loadbalancer.server.port=80
-
   anime-blog:
     image: ghcr.io/crvouga/chrisvouga-anime-blog:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -187,7 +176,6 @@ services:
       - traefik.http.routers.animeblog.entrypoints=web
       - traefik.http.routers.animeblog.middlewares=cfproto@docker
       - traefik.http.services.animeblog.loadbalancer.server.port=80
-
   snake-game:
     image: ghcr.io/crvouga/chrisvouga-snake-game:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -199,7 +187,6 @@ services:
       - traefik.http.routers.snakegame.entrypoints=web
       - traefik.http.routers.snakegame.middlewares=cfproto@docker
       - traefik.http.services.snakegame.loadbalancer.server.port=80
-
   match-three:
     image: ghcr.io/crvouga/chrisvouga-match-three:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -211,7 +198,6 @@ services:
       - traefik.http.routers.matchthree.entrypoints=web
       - traefik.http.routers.matchthree.middlewares=cfproto@docker
       - traefik.http.services.matchthree.loadbalancer.server.port=80
-
   simon-says:
     image: ghcr.io/crvouga/chrisvouga-simon-says:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -223,7 +209,6 @@ services:
       - traefik.http.routers.simonsays.entrypoints=web
       - traefik.http.routers.simonsays.middlewares=cfproto@docker
       - traefik.http.services.simonsays.loadbalancer.server.port=80
-
   vault:
     image: ghcr.io/crvouga/chrisvouga-vault:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -239,7 +224,6 @@ services:
       - traefik.http.routers.vault.entrypoints=web
       - traefik.http.routers.vault.middlewares=cfproto@docker
       - traefik.http.services.vault.loadbalancer.server.port=8200
-
   turborepo:
     image: ghcr.io/crvouga/chrisvouga-turborepo:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -260,3 +244,31 @@ services:
       - traefik.http.routers.turborepo.entrypoints=web
       - traefik.http.routers.turborepo.middlewares=cfproto@docker
       - traefik.http.services.turborepo.loadbalancer.server.port=8080
+  normalizer:
+    image: ghcr.io/crvouga/chrisvouga-normalizer:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - web
+    env_file:
+      - ./env/normalizer.env
+    environment:
+      PORT: "8080"
+      NODE_ENV: "production"
+      SERVER_BASE_URL: "https://normalizer.chrisvouga.dev"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.normalizer.rule=Host(`normalizer.chrisvouga.dev`)
+      - traefik.http.routers.normalizer.entrypoints=web
+      - traefik.http.routers.normalizer.middlewares=cfproto@docker
+      - traefik.http.services.normalizer.loadbalancer.server.port=8080
+  normalizer-worker:
+    image: ghcr.io/crvouga/chrisvouga-normalizer-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - web
+    env_file:
+      - ./env/normalizer-worker.env
+    environment:
+      NODE_ENV: "production"
+    depends_on:
+      - normalizer

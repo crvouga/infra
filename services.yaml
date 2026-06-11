@@ -224,3 +224,68 @@ services:
     secrets:
       - name: VAULT_TOKEN
         source: vault
+
+  - id: normalizer
+    hostname: normalizer.chrisvouga.dev
+    github_repo: crvouga/normalizer.app
+    source_code_url: https://github.com/crvouga/normalizer.app
+    dockerfile: infra/server.Dockerfile
+    build_context: .
+    port: 8080
+    health_check: true
+    health_path: /health
+    env:
+      PORT: "8080"
+      NODE_ENV: production
+      SERVER_BASE_URL: "https://normalizer.chrisvouga.dev"
+    secrets:
+      - name: DATABASE_URL
+        source: vault
+      - name: S3_ENDPOINT
+        source: vault
+      - name: S3_ACCESS_KEY
+        source: vault
+      - name: S3_SECRET_KEY
+        source: vault
+      - name: S3_BUCKET
+        source: vault
+      - name: OPENAI_API_KEY
+        source: vault
+      - name: OBJECT_STORE_PRESIGNED_URL_SECRET
+        source: vault
+      - name: GOOGLE_CLIENT_ID
+        source: vault
+      - name: GOOGLE_CLIENT_SECRET
+        source: vault
+
+  - id: normalizer-worker
+    internal: true
+    github_repo: crvouga/normalizer.app
+    source_code_url: https://github.com/crvouga/normalizer.app
+    dockerfile: infra/worker.Dockerfile
+    build_context: .
+    health_check: false
+    env:
+      NODE_ENV: production
+    depends_on:
+      - normalizer
+    secrets:
+      - name: DATABASE_URL
+        source: vault
+      - name: S3_ENDPOINT
+        source: vault
+      - name: S3_ACCESS_KEY
+        source: vault
+      - name: S3_SECRET_KEY
+        source: vault
+      - name: S3_BUCKET
+        source: vault
+      - name: OPENAI_API_KEY
+        source: vault
+
+aliases:
+  - zone: normalizer.app
+    hosts:
+      - normalizer.app
+      - www.normalizer.app
+    target: normalizer.chrisvouga.dev
