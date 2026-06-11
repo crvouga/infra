@@ -47,7 +47,7 @@ In `secret/data/personal/prd` on [vault-chrisvouga.fly.dev](https://vault-chrisv
 | `CLOUDFLARE_API_TOKEN` | DNS sync (existing) |
 | App secrets | TMDB, Twilio, etc. (existing) |
 
-Node SSH credentials live in shared Vault — provisioning writes them automatically. The `github-actions` Vault role needs `patch` on `secret/data/personal/prd`.
+Node SSH credentials live in shared Vault — provisioning writes them automatically. The `github-actions` Vault role needs `patch` on `secret/data/personal/prd`. CI connects to [vault-chrisvouga.fly.dev](https://vault-chrisvouga.fly.dev) but JWT `aud` remains `https://vault.chrisvouga.dev` until the Vault role is updated.
 
 ### 2. Run Setup workflow
 
