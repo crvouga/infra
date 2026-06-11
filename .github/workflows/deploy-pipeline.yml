@@ -2,7 +2,7 @@ name: Deploy Pipeline
 
 # Single-node Docker stack — fully automated via GitHub Actions.
 #
-#   prepare → bootstrap-node → dns-sync → secrets-sync → deploy → health-check → [fly-teardown]
+#   prepare → bootstrap-node → dns-sync → secrets-sync → deploy → health-check → fly-teardown
 #
 # Triggers:
 #   - push to main
@@ -36,11 +36,6 @@ on:
         required: false
         type: boolean
         default: true
-      run_fly_teardown:
-        description: "After health-check, trigger portfolio fly-teardown."
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: deploy-pipeline-${{ github.ref }}
@@ -239,12 +234,7 @@ jobs:
   fly-teardown:
     runs-on: ubuntu-latest
     needs: health-check
-    if: >-
-      ${{
-        needs.health-check.result == 'success'
-        && github.event_name == 'workflow_dispatch'
-        && inputs.run_fly_teardown == true
-      }}
+    if: ${{ needs.health-check.result == 'success' }}
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/vault-secrets
@@ -256,12 +246,27 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           sudo apt update
           sudo apt install gh -y
-      - name: Trigger portfolio fly-teardown
+      - name: Tear down orphan Fly apps (idempotent)
         env:
           GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
         run: |
           set -euo pipefail
           export GH_TOKEN="${GITHUB_TOKEN_SUPER}"
+          BEFORE="$(gh run list --workflow=fly-teardown.yml --repo crvouga/portfolio --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           gh workflow run fly-teardown.yml --repo crvouga/portfolio \
             -f max_teardowns_per_run=15 \
             -f force_teardown=true
+          RUN_ID=""
+          for _ in $(seq 1 30); do
+            RUN_ID="$(gh run list --workflow=fly-teardown.yml --repo crvouga/portfolio --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "${RUN_ID}" ] && [ "${RUN_ID}" != "${BEFORE}" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "${RUN_ID}" ]; then
+            echo "Timed out waiting for portfolio fly-teardown workflow run"
+            exit 1
+          fi
+          gh run watch "${RUN_ID}" --repo crvouga/portfolio --exit-status
+          echo "Fly teardown complete (no-op when all chrisvouga-* Fly apps are already gone)"

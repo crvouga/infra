@@ -171,13 +171,9 @@ async function waitForDropletActive(token: string, id: number): Promise<Droplet>
   throw new Error(`Droplet ${id} did not become active in time`);
 }
 
-async function triggerDeploy(ghToken: string, runFlyTeardown: boolean): Promise<void> {
+async function triggerDeploy(ghToken: string): Promise<void> {
   process.env["GH_TOKEN"] = ghToken;
-  const args = ["workflow", "run", "deploy-pipeline.yml", "--repo", GITHUB_REPO];
-  if (runFlyTeardown) {
-    args.push("-f", "run_fly_teardown=true");
-  }
-  await $`gh ${args}`.quiet();
+  await $`gh workflow run deploy-pipeline.yml --repo ${GITHUB_REPO}`.quiet();
 }
 
 async function migrateLegacySshToVault(): Promise<boolean> {
@@ -309,7 +305,7 @@ nohup bash -c 'curl -fsSL https://get.docker.com | sh && systemctl enable docker
 
   if (args.triggerDeploy) {
     console.log("Triggering deploy-pipeline...");
-    await triggerDeploy(ghToken, false);
+    await triggerDeploy(ghToken);
   }
 
   console.log("Provision complete");

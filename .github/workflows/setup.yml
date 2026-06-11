@@ -1,6 +1,6 @@
 name: Setup
 
-# One-click bootstrap: provision DO droplet (optional) → deploy stack → optional Fly teardown.
+# One-click bootstrap: provision DO droplet (optional) → deploy stack (includes Fly teardown).
 #
 # Vault secrets required: DIGITALOCEAN_TOKEN, GITHUB_TOKEN_SUPER
 
@@ -17,11 +17,6 @@ on:
         required: false
         type: boolean
         default: true
-      decommission_fly:
-        description: "After health-check, trigger portfolio fly-teardown"
-        required: false
-        type: boolean
-        default: false
       region:
         description: "DO region (provision only)"
         required: false
@@ -74,8 +69,5 @@ jobs:
           set -euo pipefail
           export GH_TOKEN="${GITHUB_TOKEN_SUPER}"
           ARGS=(workflow run deploy-pipeline.yml --repo crvouga/chrisvouga.dev)
-          if [ "${{ inputs.decommission_fly }}" = "true" ]; then
-            ARGS+=(-f run_fly_teardown=true)
-          fi
           gh "${ARGS[@]}"
           echo "Deploy pipeline triggered — monitor Actions tab for health-check result"
