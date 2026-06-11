@@ -29,6 +29,8 @@ Project repos ──▶ ghcr.io (public images)
                  *.chrisvouga.dev
 ```
 
+**Setup succeeded?** Continue with the step-by-step migration guide: [`docs/MIGRATION.md`](docs/MIGRATION.md).
+
 ## Automated first deploy (5 steps)
 
 ### 1. Add Vault secrets
@@ -38,20 +40,23 @@ In `secret/data/personal/prd` on [vault.chrisvouga.dev](https://vault.chrisvouga
 | Key | Purpose |
 |-----|---------|
 | `DIGITALOCEAN_TOKEN` | Create/manage the origin droplet |
-| `GITHUB_TOKEN_SUPER` | PAT with `repo` + `admin:org` — sets `NODE_SSH_*` secrets, triggers workflows, cross-repo dispatch |
+| `GITHUB_TOKEN_SUPER` | PAT with `repo` + `admin:org` — triggers workflows, cross-repo dispatch |
+| `CHRISVOUGA_DEV_NODE_SSH_HOST` | Origin droplet IP (auto-written by provision) |
+| `CHRISVOUGA_DEV_NODE_SSH_USER` | SSH user, typically `root` (auto-written) |
+| `CHRISVOUGA_DEV_NODE_SSH_KEY` | SSH private key (auto-written) |
 | `CLOUDFLARE_API_TOKEN` | DNS sync (existing) |
 | App secrets | TMDB, Twilio, etc. (existing) |
 
-No manual `NODE_SSH_*` setup — provisioning writes them automatically.
+Node SSH credentials live in shared Vault — provisioning writes them automatically. The `github-actions` Vault role needs `patch` on `secret/data/personal/prd`.
 
 ### 2. Run Setup workflow
 
 In GitHub Actions → **Setup** → Run workflow:
 
-- `provision_droplet: true` (default) — creates `chrisvouga-origin` droplet (8 GB, Ubuntu 24.04), installs Docker, sets `NODE_SSH_HOST/USER/KEY`
+- `provision_droplet: true` (default) — creates `chrisvouga-origin` droplet (8 GB, Ubuntu 24.04), installs Docker, writes `CHRISVOUGA_DEV_NODE_SSH_*` to Vault
 - `deploy: true` (default) — triggers **Deploy Pipeline**
 
-Skips droplet creation if `NODE_SSH_HOST` secret already exists.
+Skips droplet creation if `CHRISVOUGA_DEV_NODE_SSH_HOST` is already in Vault. One-time migration from legacy GitHub `NODE_SSH_*` repo secrets runs automatically when present.
 
 ### 3. Roll out publish workflows to sibling repos
 

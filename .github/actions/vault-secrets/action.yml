@@ -10,6 +10,7 @@ runs:
         path: jwt
         role: github-actions
         jwtGithubAudience: https://vault.chrisvouga.dev
+        exportToken: true
         secrets: |
           secret/data/personal/prd CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
           secret/data/personal/prd CLOUDFLARE_ACCOUNT_ID | CLOUDFLARE_ACCOUNT_ID ;
@@ -18,4 +19,7 @@ runs:
           secret/data/personal/prd TWILIO_AUTH_TOKEN | TWILIO_AUTH_TOKEN ;
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
           secret/data/personal/prd DIGITALOCEAN_TOKEN | DIGITALOCEAN_TOKEN ;
-          secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER
+          secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER ;
+          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_HOST | CHRISVOUGA_DEV_NODE_SSH_HOST ;
+          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_USER | CHRISVOUGA_DEV_NODE_SSH_USER ;
+          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_KEY | CHRISVOUGA_DEV_NODE_SSH_KEY

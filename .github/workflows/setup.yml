@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       provision_droplet:
-        description: "Create DO droplet + set NODE_SSH_* secrets (skips if secrets exist)"
+        description: "Create DO droplet + write CHRISVOUGA_DEV_NODE_SSH_* to Vault (skips if set)"
         required: false
         type: boolean
         default: true
@@ -53,6 +53,10 @@ jobs:
         env:
           GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
           DIGITALOCEAN_TOKEN: ${{ env.DIGITALOCEAN_TOKEN }}
+          VAULT_ADDR: https://vault.chrisvouga.dev
+          MIGRATE_FROM_LEGACY_NODE_SSH_HOST: ${{ secrets.NODE_SSH_HOST }}
+          MIGRATE_FROM_LEGACY_NODE_SSH_USER: ${{ secrets.NODE_SSH_USER }}
+          MIGRATE_FROM_LEGACY_NODE_SSH_KEY: ${{ secrets.NODE_SSH_KEY }}
         run: |
           set -euo pipefail
           bun run scripts/provision-droplet.ts \

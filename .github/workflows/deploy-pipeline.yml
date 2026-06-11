@@ -99,13 +99,14 @@ jobs:
     needs: prepare
     steps:
       - uses: actions/checkout@v5
+      - uses: ./.github/actions/vault-secrets
 
       - name: Rsync stack files to node
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.NODE_SSH_HOST }}
-          username: ${{ secrets.NODE_SSH_USER }}
-          key: ${{ secrets.NODE_SSH_KEY }}
+          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
+          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
+          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
           source: "docker-compose.yml,traefik,services.yaml,scripts/bootstrap-node.sh,scripts/deploy.sh"
           target: ${{ env.DEPLOY_DIR }}
           strip_components: 0
@@ -114,9 +115,9 @@ jobs:
       - name: Bootstrap node
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.NODE_SSH_HOST }}
-          username: ${{ secrets.NODE_SSH_USER }}
-          key: ${{ secrets.NODE_SSH_KEY }}
+          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
+          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
+          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
           script_stop: true
           script: |
             set -euo pipefail
@@ -134,7 +135,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Reconcile DNS
         env:
-          NODE_SSH_HOST: ${{ secrets.NODE_SSH_HOST }}
           SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
           CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
         run: |
@@ -178,18 +178,18 @@ jobs:
       - name: Upload env files to node
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.NODE_SSH_HOST }}
-          username: ${{ secrets.NODE_SSH_USER }}
-          key: ${{ secrets.NODE_SSH_KEY }}
+          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
+          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
+          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
           source: "env,node.env"
           target: ${{ env.DEPLOY_DIR }}
           overwrite: true
       - name: Place runtime .env on node
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.NODE_SSH_HOST }}
-          username: ${{ secrets.NODE_SSH_USER }}
-          key: ${{ secrets.NODE_SSH_KEY }}
+          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
+          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
+          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
           script: |
             set -euo pipefail
             mv ${{ env.DEPLOY_DIR }}/node.env ${{ env.DEPLOY_DIR }}/.env
@@ -208,9 +208,9 @@ jobs:
       - name: Deploy stack
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.NODE_SSH_HOST }}
-          username: ${{ secrets.NODE_SSH_USER }}
-          key: ${{ secrets.NODE_SSH_KEY }}
+          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
+          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
+          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
           script_stop: true
           envs: IMAGE_TAG
           script: |

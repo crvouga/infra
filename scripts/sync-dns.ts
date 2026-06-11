@@ -3,7 +3,7 @@
  * Reconcile Cloudflare DNS for the single-node stack.
  *
  * Ensures:
- *   origin.<zone>  A      → NODE_SSH_HOST (droplet IP)
+ *   origin.<zone>  A      → CHRISVOUGA_DEV_NODE_SSH_HOST (droplet IP)
  *   <hostname>     CNAME  → origin.<zone>  (proxied=true by default)
  *
  * Prunes orphan CNAMEs pointing at *.fly.dev.
@@ -48,9 +48,11 @@ function parseArgs(argv: readonly string[]): Args {
 }
 
 function nodeIp(): string {
-  const ip = process.env["NODE_SSH_HOST"]?.trim();
+  const ip = process.env["CHRISVOUGA_DEV_NODE_SSH_HOST"]?.trim();
   if (!ip) {
-    throw new Error("NODE_SSH_HOST is required (droplet IP for origin A record).");
+    throw new Error(
+      "CHRISVOUGA_DEV_NODE_SSH_HOST is required (droplet IP for origin A record).",
+    );
   }
   return ip;
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Provision DigitalOcean droplet and wire NODE_SSH_* GitHub secrets.
+ * Provision DigitalOcean droplet and write node SSH credentials to shared Vault.
  *
  * Usage:
  *   bun run scripts/provision-droplet.ts
@@ -9,12 +9,22 @@
  *
  * Env:
  *   DIGITALOCEAN_TOKEN
- *   GITHUB_TOKEN_SUPER  (gh CLI auth for secret set + workflow dispatch)
+ *   GITHUB_TOKEN_SUPER  (gh CLI auth for workflow dispatch)
+ *   VAULT_TOKEN         (exported by vault-secrets action in CI)
+ *   CHRISVOUGA_DEV_NODE_SSH_*  (loaded from Vault when already provisioned)
+ *   MIGRATE_FROM_LEGACY_NODE_SSH_*  (one-time copy from GitHub repo secrets)
  */
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { $ } from "bun";
+import {
+  nodeSshFromEnv,
+  nodeSshHostFromEnv,
+  setNodeSshEnv,
+  type NodeSshCredentials,
+} from "../lib/node-ssh.js";
+import { writeNodeSshToVault } from "../lib/vault-kv.js";
 
 const DO_API = "https://api.digitalocean.com/v2";
 const DROPLET_NAME = "chrisvouga-origin";
@@ -161,25 +171,6 @@ async function waitForDropletActive(token: string, id: number): Promise<Droplet>
   throw new Error(`Droplet ${id} did not become active in time`);
 }
 
-async function ghSecretExists(name: string, ghToken: string): Promise<boolean> {
-  const res = await fetch(
-    `https://api.github.com/repos/${GITHUB_REPO}/actions/secrets/${name}`,
-    {
-      headers: {
-        Authorization: `Bearer ${ghToken}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    },
-  );
-  return res.status === 200;
-}
-
-async function ghSecretSet(name: string, value: string, ghToken: string): Promise<void> {
-  process.env["GH_TOKEN"] = ghToken;
-  await $`gh secret set ${name} --repo ${GITHUB_REPO} --body ${value}`.quiet();
-}
-
 async function triggerDeploy(ghToken: string, runFlyTeardown: boolean): Promise<void> {
   process.env["GH_TOKEN"] = ghToken;
   const args = ["workflow", "run", "deploy-pipeline.yml", "--repo", GITHUB_REPO];
@@ -189,47 +180,65 @@ async function triggerDeploy(ghToken: string, runFlyTeardown: boolean): Promise<
   await $`gh ${args}`.quiet();
 }
 
+async function migrateLegacySshToVault(): Promise<boolean> {
+  if (nodeSshHostFromEnv()) return false;
+
+  const host = process.env.MIGRATE_FROM_LEGACY_NODE_SSH_HOST?.trim();
+  const user = process.env.MIGRATE_FROM_LEGACY_NODE_SSH_USER?.trim() || "root";
+  const privateKey = process.env.MIGRATE_FROM_LEGACY_NODE_SSH_KEY?.trim();
+  if (!host || !privateKey) return false;
+
+  const creds: NodeSshCredentials = { host, user, privateKey };
+  await writeNodeSshToVault(creds);
+  setNodeSshEnv(creds);
+  console.log("Migrated legacy GitHub NODE_SSH_* repo secrets to Vault (CHRISVOUGA_DEV_NODE_SSH_*)");
+  return true;
+}
+
+async function persistNodeSshToVault(creds: NodeSshCredentials): Promise<void> {
+  await writeNodeSshToVault(creds);
+  setNodeSshEnv(creds);
+  console.log("Wrote CHRISVOUGA_DEV_NODE_SSH_* to Vault (secret/data/personal/prd)");
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const doToken = requireEnv("DIGITALOCEAN_TOKEN");
   const ghToken = requireEnv("GITHUB_TOKEN_SUPER");
 
-  if (args.skipIfSecretsExist) {
-    const exists = await ghSecretExists("NODE_SSH_HOST", ghToken);
-    if (exists) {
-      console.log("NODE_SSH_HOST secret already set — skipping provision");
-      return;
-    }
+  await migrateLegacySshToVault();
+
+  if (args.skipIfSecretsExist && nodeSshHostFromEnv()) {
+    console.log("CHRISVOUGA_DEV_NODE_SSH_HOST already in Vault — skipping provision");
+    return;
   }
 
-  const sshSecretsExist = await ghSecretExists("NODE_SSH_HOST", ghToken);
+  const sshConfiguredInVault = nodeSshHostFromEnv() !== null;
   const existing = await findDropletByName(doToken, DROPLET_NAME);
   if (existing) {
     const ip = existing.networks.v4.find((n) => n.type === "public")?.ip_address;
     console.log(`Droplet "${DROPLET_NAME}" already exists (id=${existing.id}, ip=${ip})`);
     if (!ip) throw new Error("Existing droplet has no public IP");
 
-    if (sshSecretsExist) {
-      console.log("NODE_SSH_HOST secret already set — reusing existing droplet");
+    if (sshConfiguredInVault) {
+      console.log("Vault SSH credentials present — reusing existing droplet");
       return;
     }
 
-    const privateKeyFromEnv = process.env["NODE_SSH_PRIVATE_KEY"]?.trim();
-    if (!args.dryRun && privateKeyFromEnv) {
-      console.log("Re-using existing droplet — updating NODE_SSH_* secrets from env");
-      await ghSecretSet("NODE_SSH_HOST", ip, ghToken);
-      await ghSecretSet("NODE_SSH_USER", "root", ghToken);
-      await ghSecretSet("NODE_SSH_KEY", privateKeyFromEnv, ghToken);
+    const credsFromEnv = nodeSshFromEnv();
+    if (!args.dryRun && credsFromEnv) {
+      console.log("Re-using existing droplet — updating Vault SSH credentials from env");
+      await persistNodeSshToVault(credsFromEnv);
       return;
     }
 
     if (args.dryRun) {
-      console.log("[dry-run] Would delete orphaned droplet and recreate with new SSH key");
+      console.log("[dry-run] Would delete orphaned droplet and recreate with a registered DO SSH key");
       return;
     }
 
     console.log(
-      "Orphaned droplet found (no NODE_SSH_* secrets) — deleting and recreating with a registered DO SSH key",
+      "Orphaned droplet found (no CHRISVOUGA_DEV_NODE_SSH_* in Vault) — deleting and recreating",
     );
     await deleteDroplet(doToken, existing.id);
     for (let i = 0; i < 30; i++) {
@@ -260,7 +269,6 @@ async function main(): Promise<void> {
     pubKey,
   );
 
-  // DO injects ssh_keys at boot; install Docker in the background so SSH is ready immediately.
   const userData = `#!/bin/bash
 set -euo pipefail
 nohup bash -c 'curl -fsSL https://get.docker.com | sh && systemctl enable docker && systemctl start docker' >/var/log/docker-install.log 2>&1 &
@@ -295,10 +303,7 @@ nohup bash -c 'curl -fsSL https://get.docker.com | sh && systemctl enable docker
   await waitForSsh(keyPath, ip);
   console.log("SSH ready");
 
-  console.log("Setting GitHub secrets...");
-  await ghSecretSet("NODE_SSH_HOST", ip, ghToken);
-  await ghSecretSet("NODE_SSH_USER", "root", ghToken);
-  await ghSecretSet("NODE_SSH_KEY", privateKey, ghToken);
+  await persistNodeSshToVault({ host: ip, user: "root", privateKey });
 
   rmSync(workDir, { recursive: true, force: true });
 
