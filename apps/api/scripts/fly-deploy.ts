@@ -17,7 +17,6 @@ export type FlyDeployOptions = {
   readonly app?: string;
   readonly sourceImage: string;
   readonly vaultToken: string;
-  readonly flyOrg?: string;
 };
 
 type CommandResult = {
@@ -68,18 +67,20 @@ function flyAppExists(app: string): boolean {
   return runFly(['status', '--app', app]).status === 0;
 }
 
-export function ensureFlyApp(app: string, flyOrg?: string): void {
+export function ensureFlyApp(app: string): void {
   if (flyAppExists(app)) {
     process.stdout.write(`[deploy] Fly app ${app} already exists.\n`);
     return;
   }
 
-  const createArgs = ['apps', 'create', app, '--yes'];
-  if (flyOrg !== undefined && flyOrg.length > 0) {
-    createArgs.push('--org', flyOrg);
-  }
-  process.stdout.write(`[deploy] creating Fly app ${app}.\n`);
-  runOrExit('flyctl', createArgs, `fly apps create ${app}`);
+  process.stdout.write(
+    `[deploy] creating Fly app ${app} (org from FLY_API_TOKEN).\n`
+  );
+  runOrExit(
+    'flyctl',
+    ['apps', 'create', app, '--yes'],
+    `fly apps create ${app}`
+  );
 }
 
 export function syncFlySecrets(app: string, vaultToken: string): void {
@@ -204,12 +205,10 @@ export function resolveFlyDeployOptions(): FlyDeployOptions {
     process.exit(1);
   }
 
-  const flyOrg = process.env['FLY_ORG']?.trim();
   return {
     app: process.env['FLY_APP']?.trim() || FLY_APP_NAME,
     sourceImage,
     vaultToken,
-    ...(flyOrg !== undefined && flyOrg.length > 0 ? { flyOrg } : {}),
   };
 }
 
@@ -217,7 +216,7 @@ export async function runPipelineDeploy(
   options: FlyDeployOptions
 ): Promise<void> {
   const app = options.app ?? FLY_APP_NAME;
-  ensureFlyApp(app, options.flyOrg);
+  ensureFlyApp(app);
   syncFlySecrets(app, options.vaultToken);
   ensureFlyCertificate(app, CACHE_PUBLIC_HOSTNAME);
   await syncCloudflareDns(app);

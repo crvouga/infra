@@ -36,7 +36,6 @@ export const VaultSecretKey = {
   b2Bucket: 'B2_BUCKET',
   vaultToken: 'VAULT_TOKEN',
   flyApiToken: 'FLY_API_TOKEN',
-  flyOrg: 'FLY_ORG',
   cloudflareApiToken: 'CLOUDFLARE_API_TOKEN',
   cloudflareZoneId: 'CLOUDFLARE_ZONE_ID',
 } as const;
@@ -103,12 +102,6 @@ export const VAULT_SECRET_REGISTRY: readonly SecretDefinition[] = [
     required: true,
     usedBy: ['deploy'],
     hint: 'Fly.io API token with deploy permissions for turborepo-remote-cache',
-  },
-  {
-    key: VaultSecretKey.flyOrg,
-    required: false,
-    usedBy: ['deploy'],
-    hint: 'Fly.io org slug when creating the app (defaults to the token default org)',
   },
   {
     key: VaultSecretKey.cloudflareApiToken,

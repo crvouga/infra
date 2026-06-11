@@ -51,7 +51,6 @@ jobs:
             secret/data/personal/dev B2_BUCKET | B2_BUCKET ;
             secret/data/personal/dev VAULT_TOKEN | VAULT_TOKEN ;
             secret/data/personal/dev FLY_API_TOKEN | FLY_API_TOKEN ;
-            secret/data/personal/dev FLY_ORG | FLY_ORG ;
             secret/data/personal/dev CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
             secret/data/personal/dev CLOUDFLARE_ZONE_ID | CLOUDFLARE_ZONE_ID
       - name: Verify Vault secrets (dev)
@@ -99,7 +98,6 @@ jobs:
             secret/data/personal/prd B2_BUCKET | B2_BUCKET ;
             secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN ;
             secret/data/personal/prd FLY_API_TOKEN | FLY_API_TOKEN ;
-            secret/data/personal/prd FLY_ORG | FLY_ORG ;
             secret/data/personal/prd CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
             secret/data/personal/prd CLOUDFLARE_ZONE_ID | CLOUDFLARE_ZONE_ID
       - name: Verify Vault secrets (prd)
