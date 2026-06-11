@@ -1,4 +1,4 @@
-# Single workflow: CI checks on every push/PR, deploy on main after checks pass.
+# CI checks on every push/PR; deploy on main runs in parallel (no check gate).
 # CI authenticates to Vault via GitHub OIDC (no stored token).
 name: Deployment Pipeline
 
@@ -64,7 +64,6 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     concurrency:
       group: deploy-${{ github.workflow }}-${{ github.ref }}

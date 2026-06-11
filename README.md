@@ -67,7 +67,7 @@ bun run check  # format + tc + lint + test + build
 Single workflow: [`.github/workflows/deployment-pipeline.yml`](.github/workflows/deployment-pipeline.yml)
 
 - **check** — every push/PR: Vault `dev` secrets gate + `bun run check`
-- **deploy** — main push only: Vault `prd` secrets → GHCR image push → Fly app/certs/secrets/deploy → smoke test
+- **deploy** — main push only (runs in parallel with check): Vault `prd` secrets → GHCR → Fly deploy → smoke test
 
 The deploy job is fully automated from Vault:
 

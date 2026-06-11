@@ -36,7 +36,7 @@ Required keys (manual): `TURBO_TOKEN`, `VAULT_TOKEN`, B2 `B2_*`, `FLY_API_TOKEN`
 Single workflow: `.github/workflows/deployment-pipeline.yml`
 
 1. **check** — Vault dev secrets (OIDC) + `bun run check` on every push/PR
-2. **deploy** — Vault prd secrets (OIDC) + GHCR push + Fly app/certs/Cloudflare DNS/deploy on main push only
+2. **deploy** — Vault prd secrets (OIDC) + GHCR push + Fly deploy on main push only (parallel with check, not gated on it)
 
 Deploy is fully automated from Vault (`apps/api/scripts/fly-deploy.ts` + `scripts/cloudflare-dns.ts`): app creation, `VAULT_TOKEN` sync, TLS cert, Cloudflare DNS upsert, image deploy.
 
