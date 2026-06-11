@@ -246,6 +246,7 @@ jobs:
         && inputs.run_fly_teardown == true
       }}
     steps:
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/vault-secrets
       - name: Install gh CLI
         run: |
