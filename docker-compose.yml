@@ -223,3 +223,38 @@ services:
       - traefik.http.routers.simonsays.entrypoints=web
       - traefik.http.routers.simonsays.middlewares=cfproto@docker
       - traefik.http.services.simonsays.loadbalancer.server.port=80
+
+  vault:
+    image: ghcr.io/crvouga/chrisvouga-vault:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - web
+    env_file:
+      - ./env/vault.env
+    environment:
+      BAO_API_ADDR: "https://vault.chrisvouga.dev"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.vault.rule=Host(`vault.chrisvouga.dev`)
+      - traefik.http.routers.vault.entrypoints=web
+      - traefik.http.routers.vault.middlewares=cfproto@docker
+      - traefik.http.services.vault.loadbalancer.server.port=8200
+
+  turborepo:
+    image: ghcr.io/crvouga/chrisvouga-turborepo:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - web
+    env_file:
+      - ./env/turborepo.env
+    environment:
+      PORT: "8080"
+      VAULT_ADDR: "https://vault.chrisvouga.dev"
+      VAULT_PROJECT: "personal"
+      VAULT_CONFIG: "prd"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.turborepo.rule=Host(`turborepo.chrisvouga.dev`)
+      - traefik.http.routers.turborepo.entrypoints=web
+      - traefik.http.routers.turborepo.middlewares=cfproto@docker
+      - traefik.http.services.turborepo.loadbalancer.server.port=8080

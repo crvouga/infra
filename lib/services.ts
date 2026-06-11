@@ -18,6 +18,8 @@ export type ServiceSpec = {
   readonly build_context: string;
   readonly port: number;
   readonly health_check: boolean;
+  /** Health-check path (default `/`). */
+  readonly health_path?: string;
   readonly env?: Readonly<Record<string, string>>;
   readonly secrets?: readonly SecretSpec[];
 };

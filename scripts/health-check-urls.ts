@@ -94,7 +94,8 @@ async function main(): Promise<void> {
   const failed: string[] = [];
 
   for (const service of services) {
-    const url = `https://${service.hostname}/`;
+    const path = service.health_path ?? "/";
+    const url = `https://${service.hostname}${path}`;
     console.log(`Checking ${service.id} → ${url}`);
     const result = await checkWithRetries(url, args);
     if (!result.ok) failed.push(`${service.id}: ${result.error}`);

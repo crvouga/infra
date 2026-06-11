@@ -155,6 +155,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: ./.github/actions/vault-secrets
       - run: bun install --frozen-lockfile
+      - name: Export bootstrap secrets
+        env:
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DB_CONNECTION_URI:-}" ]; then
+            echo "DB_CONNECTION_URI=${DB_CONNECTION_URI}" >> "$GITHUB_ENV"
+          fi
       - name: Write service env files
         run: |
           set -euo pipefail
@@ -217,10 +225,61 @@ jobs:
             SERVICE_ID="${{ needs.prepare.outputs.service_id }}"
             bash scripts/deploy.sh "${SERVICE_ID}"
 
-  health-check:
+  vault-unseal:
     runs-on: ubuntu-latest
     needs: [prepare, deploy]
-    if: ${{ needs.deploy.result == 'success' }}
+    if: >-
+      ${{
+        needs.deploy.result == 'success'
+        && (
+          needs.prepare.outputs.service_id == ''
+          || needs.prepare.outputs.service_id == 'vault'
+        )
+      }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/vault-secrets
+      - name: Install gh CLI
+        run: |
+          type -p curl >/dev/null || sudo apt install curl -y
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
+      - name: Unseal vault after deploy
+        env:
+          GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="${GITHUB_TOKEN_SUPER}"
+          BEFORE="$(gh run list --workflow=unseal.yml --repo crvouga/vault --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          gh workflow run unseal.yml --repo crvouga/vault --ref main
+          RUN_ID=""
+          for _ in $(seq 1 30); do
+            RUN_ID="$(gh run list --workflow=unseal.yml --repo crvouga/vault --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "${RUN_ID}" ] && [ "${RUN_ID}" != "${BEFORE}" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "${RUN_ID}" ]; then
+            echo "Timed out waiting for vault unseal workflow run"
+            exit 1
+          fi
+          gh run watch "${RUN_ID}" --repo crvouga/vault --exit-status
+
+  health-check:
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy, vault-unseal]
+    if: >-
+      ${{
+        needs.deploy.result == 'success'
+        && (
+          needs.vault-unseal.result == 'success'
+          || needs.vault-unseal.result == 'skipped'
+        )
+      }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

@@ -20,7 +20,6 @@ import { tmpdir } from "node:os";
 import { $ } from "bun";
 import {
   DEFAULT_VAULT_ADDR,
-  LEGACY_VAULT_ADDR,
   resolveVaultAddr,
 } from "../lib/vault-kv.js";
 
@@ -171,12 +170,6 @@ async function setGithubSecret(repo: string, token: string, dryRun: boolean): Pr
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const envVault = process.env.VAULT_ADDR?.trim().replace(/\/$/, "");
-  if (envVault === LEGACY_VAULT_ADDR) {
-    console.log(
-      `Note: ${LEGACY_VAULT_ADDR} is unavailable — using ${DEFAULT_VAULT_ADDR} for Vault CLI/API`,
-    );
-  }
   console.log(`Vault: ${args.vaultAddr}`);
   console.log(`GitHub repo: ${args.repo}`);
 
