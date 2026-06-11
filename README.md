@@ -127,4 +127,4 @@ bun run make-ghcr-public
 
 ## Cloudflare SSL
 
-Set SSL/TLS mode to **Full** (not Full Strict) — origin serves HTTP on port 80, Cloudflare serves HTTPS to visitors.
+Set SSL/TLS mode to **Flexible** — origin serves HTTP on port 80; Cloudflare serves HTTPS to visitors. (`dns-sync --apply` sets this automatically.)

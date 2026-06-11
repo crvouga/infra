@@ -71,7 +71,7 @@ networks:
 
 services:
   traefik:
-    image: traefik:v3.3
+    image: traefik:v3.6.6
     restart: unless-stopped
     command:
       - --configFile=/etc/traefik/traefik.yml

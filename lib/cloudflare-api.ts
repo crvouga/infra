@@ -164,6 +164,25 @@ export class CloudflareApi {
     );
   }
 
+  async getZoneSetting(zoneId: string, setting: string): Promise<{ readonly id: string; readonly value: unknown }> {
+    return this.request<{ id: string; value: unknown }>(
+      "GET",
+      `/zones/${encodeURIComponent(zoneId)}/settings/${encodeURIComponent(setting)}`,
+    );
+  }
+
+  async setZoneSetting(
+    zoneId: string,
+    setting: string,
+    value: unknown,
+  ): Promise<{ readonly id: string; readonly value: unknown }> {
+    return this.request<{ id: string; value: unknown }>(
+      "PATCH",
+      `/zones/${encodeURIComponent(zoneId)}/settings/${encodeURIComponent(setting)}`,
+      { value },
+    );
+  }
+
   async getRulesetPhaseEntrypoint(
     zoneId: string,
     phase: string,

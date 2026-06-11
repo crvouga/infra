@@ -78,6 +78,28 @@ type Action =
   | { readonly kind: "ok"; readonly name: string };
 
 const FLY_SUFFIX = ".fly.dev";
+/** Origin serves HTTP :80 only — Cloudflare must use Flexible, not Full. */
+const DESIRED_SSL_MODE = "flexible";
+
+async function reconcileSslMode(
+  cf: CloudflareApi,
+  zoneId: string,
+  apply: boolean,
+): Promise<void> {
+  const current = await cf.getZoneSetting(zoneId, "ssl");
+  const mode = String(current.value);
+  if (mode === DESIRED_SSL_MODE) {
+    console.log(`  OK     SSL/TLS mode=${mode}`);
+    return;
+  }
+  const line = `UPDATE SSL/TLS mode: ${mode} → ${DESIRED_SSL_MODE}`;
+  if (!apply) {
+    console.log(`  [plan] ${line}`);
+    return;
+  }
+  await cf.setZoneSetting(zoneId, "ssl", DESIRED_SSL_MODE);
+  console.log(`  [done] ${line}`);
+}
 
 async function planActions(
   records: readonly CloudflareDnsRecord[],
@@ -243,6 +265,8 @@ async function main(): Promise<void> {
 
   const records = await cf.listDnsRecords(zone.id);
   const actions = await planActions(records, config, services, args);
+
+  await reconcileSslMode(cf, zone.id, args.apply);
 
   let changes = 0;
   let errors = 0;

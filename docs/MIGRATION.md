@@ -59,9 +59,9 @@ If `health-check` failed on first run, that is expected until container images e
 In the Cloudflare dashboard for `chrisvouga.dev`:
 
 1. **SSL/TLS** → Overview
-2. Set encryption mode to **Full** (not Full Strict)
+2. Set encryption mode to **Flexible**
 
-The origin serves HTTP on port 80 only. Cloudflare terminates HTTPS for visitors.
+The origin serves HTTP on port 80 only. Cloudflare terminates HTTPS for visitors and connects to the origin over HTTP. **Full** or **Full (strict)** causes HTTP 522 because nothing listens on origin port 443.
 
 ---
 
@@ -297,7 +297,7 @@ Copy and track progress:
 
 - [ ] Setup workflow succeeded
 - [ ] Deploy Pipeline bootstrap jobs green (`bootstrap-node`, `dns-sync`, `secrets-sync`, `deploy`)
-- [ ] Cloudflare SSL/TLS set to **Full**
+- [ ] Cloudflare SSL/TLS set to **Flexible** (auto-applied by `dns-sync --apply`)
 - [ ] `bun run rollout-publish -- --set-org-dispatch-secret` completed
 - [ ] All 14 repos have green **Publish image** runs (13 siblings + portfolio)
 - [ ] All 15 ghcr images exist and are public
@@ -314,7 +314,7 @@ Copy and track progress:
 | `health-check` 502/503 | Image not built or container crashed | Check `docker compose ps` on node; re-run Publish image |
 | DNS points to old Fly host | CNAME not updated | Re-run Deploy Pipeline with `apply_dns: true` |
 | `repository_dispatch` 404 | Missing `DEPLOY_DISPATCH_TOKEN` | Re-run rollout with `--set-org-dispatch-secret` |
-| SSL error in browser | Cloudflare mode wrong | Set SSL to **Full** |
+| SSL error in browser / HTTP 522 | Cloudflare mode is Full (HTTPS to origin :443) | Set SSL to **Flexible** or re-run Deploy Pipeline with `apply_dns: true`
 | SSH deploy fails | `CHRISVOUGA_DEV_NODE_SSH_*` stale or missing in Vault | Re-run **Provision node**; confirm `github-actions` Vault role can `patch` `secret/data/personal/prd` |
 | One service only broken | Bad image or env | Deploy Pipeline with that `service_id`; check `/opt/chrisvouga/.env` on node |
 
