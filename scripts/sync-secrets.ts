@@ -68,9 +68,10 @@ function writeServiceEnv(service: ServiceSpec, outputDir: string): void {
     process.exit(1);
   }
 
-  mkdirSync(outputDir, { recursive: true });
+  mkdirSync(outputDir, { recursive: true, mode: 0o755 });
   const path = join(outputDir, `${service.id}.env`);
-  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o600 });
+  // 0o644 so appleboy/scp-action (docker, non-runner uid) can tar files on the Actions runner.
+  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o644 });
   console.log(`  wrote ${path} (${lines.length} vars)`);
 }
 
