@@ -7,9 +7,9 @@
 
 ## Architecture
 
-Self-hosted Turborepo Remote Cache on Fly.io (Docker + Bun). Artifacts live in Backblaze B2 via `@pkgs/object-store` (`ObjectStoreImplS3`). Fly secrets: `VAULT_TOKEN` (Vault boot) and `FLY_REGISTRY_AUTH` (GHCR pull). B2 creds and `TURBO_TOKEN` load from Vault at boot.
+Self-hosted Turborepo Remote Cache on Fly.io (Docker + Bun). Artifacts live in Backblaze B2 via `@pkgs/object-store` (`ObjectStoreImplS3`). Only `VAULT_TOKEN` is a Fly secret; B2 creds and `TURBO_TOKEN` load from Vault at boot.
 
-CI publishes the image to **GHCR** (`ghcr.io/crvouga/turborepo-remote-cache:<sha>`); deploy uses `fly deploy --image` with no mirror to `registry.fly.io`.
+CI publishes a **public** image to **GHCR** (`ghcr.io/crvouga/turborepo-remote-cache:<sha>`); deploy uses `fly deploy --image` with no mirror to `registry.fly.io`.
 
 ## Vault secrets (source of truth)
 
@@ -22,7 +22,7 @@ Canonical registry: [`scripts/vault-secrets-registry.ts`](scripts/vault-secrets-
 
 Both configs must carry the same required keys. `bun run setup` runs `ensure-vault-secrets.ts` to write derived defaults (`TURBO_API`, `TURBO_TEAM`, `TURBO_CACHE`) into **dev** and **prd** when missing.
 
-Required keys (manual): `TURBO_TOKEN`, `VAULT_TOKEN`, B2 `B2_*`, `FLY_API_TOKEN`, `CLOUDFLARE_API_TOKEN`, `GHCR_READ_TOKEN` (PAT with `read:packages` for Fly to pull the deploy image).
+Required keys (manual): `TURBO_TOKEN`, `VAULT_TOKEN`, B2 `B2_*`, `FLY_API_TOKEN`, `CLOUDFLARE_API_TOKEN`.
 
 ## Scripts
 
@@ -40,7 +40,7 @@ Single workflow: `.github/workflows/deployment-pipeline.yml`
 1. **check** — Vault dev secrets (OIDC) + `bun run check` on every push/PR
 2. **deploy** — Vault prd secrets (OIDC) + GHCR push + Fly deploy on main push only (parallel with check, not gated on it)
 
-Deploy is fully automated from Vault (`apps/api/scripts/fly-deploy.ts` + `scripts/cloudflare-dns.ts`): app creation, Fly secrets (`VAULT_TOKEN`, `FLY_REGISTRY_AUTH`), TLS cert, Cloudflare DNS upsert, `fly deploy --image` from GHCR.
+Deploy is fully automated from Vault (`apps/api/scripts/fly-deploy.ts` + `scripts/cloudflare-dns.ts`): app creation, `VAULT_TOKEN` sync, TLS cert, Cloudflare DNS upsert, `fly deploy --image` from public GHCR.
 
 ## Client usage
 

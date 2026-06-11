@@ -40,7 +40,6 @@ export const VaultSecretKey = {
   vaultToken: 'VAULT_TOKEN',
   flyApiToken: 'FLY_API_TOKEN',
   cloudflareApiToken: 'CLOUDFLARE_API_TOKEN',
-  ghcrReadToken: 'GHCR_READ_TOKEN',
 } as const;
 
 export const VAULT_SECRET_REGISTRY: readonly SecretDefinition[] = [
@@ -111,12 +110,6 @@ export const VAULT_SECRET_REGISTRY: readonly SecretDefinition[] = [
     required: true,
     usedBy: ['deploy'],
     hint: 'Cloudflare API token with Zone.DNS Edit for chrisvouga.dev',
-  },
-  {
-    key: VaultSecretKey.ghcrReadToken,
-    required: true,
-    usedBy: ['deploy'],
-    hint: 'GitHub PAT with read:packages so Fly can pull the GHCR deploy image',
   },
   {
     key: VaultSecretKey.turboCache,

@@ -72,12 +72,12 @@ Single workflow: [`.github/workflows/deployment-pipeline.yml`](.github/workflows
 The deploy job is fully automated from Vault:
 
 1. Creates the Fly app if missing
-2. Syncs `VAULT_TOKEN` and `FLY_REGISTRY_AUTH` (GHCR credentials) to Fly secrets
+2. Syncs `VAULT_TOKEN` to Fly secrets
 3. Adds the TLS cert for `turborepo.chrisvouga.dev` if missing
 4. Upserts Cloudflare DNS records from `fly certs setup` (DNS-only, no manual steps)
-5. Deploys the registered GHCR image (`fly deploy --image ghcr.io/...`)
+5. Deploys the public GHCR image (`fly deploy --image ghcr.io/...`)
 
-CI builds and pushes to GHCR; Fly pulls directly from GHCR (no mirror to `registry.fly.io`).
+CI builds, pushes to GHCR, and sets package visibility to public so Fly can pull without registry credentials.
 
 CI authenticates via GitHub OIDC (`hashicorp/vault-action`); no GitHub repo secrets required.
 

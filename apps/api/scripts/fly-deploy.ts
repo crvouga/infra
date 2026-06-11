@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import {
   CACHE_PUBLIC_HOSTNAME,
   FLY_APP_NAME,
-  GHCR_IMAGE_REPOSITORY,
 } from '@scripts/vault-secrets-registry';
 import {
   readCloudflareDeployConfig,
@@ -18,8 +17,6 @@ export type FlyDeployOptions = {
   readonly app?: string;
   readonly image: string;
   readonly vaultToken: string;
-  readonly ghcrUsername: string;
-  readonly ghcrReadToken: string;
 };
 
 type CommandResult = {
@@ -92,29 +89,15 @@ export function ensureFlyApp(app: string): void {
   );
 }
 
-export function buildGhcrRegistryAuth(username: string, token: string): string {
-  return JSON.stringify({
-    'ghcr.io': { username, password: token },
-  });
-}
-
-export function syncFlySecrets(
-  app: string,
-  vaultToken: string,
-  ghcrRegistryAuth: string
-): void {
-  process.stdout.write(`[deploy] syncing Fly secrets for ${app}.\n`);
+export function syncFlySecrets(app: string, vaultToken: string): void {
+  process.stdout.write(
+    `[deploy] syncing VAULT_TOKEN to Fly secrets for ${app}.\n`
+  );
   runOrExit(
     'flyctl',
     ['secrets', 'set', 'VAULT_TOKEN=-', '--app', app],
     'fly secrets set VAULT_TOKEN',
     { input: vaultToken }
-  );
-  runOrExit(
-    'flyctl',
-    ['secrets', 'set', 'FLY_REGISTRY_AUTH=-', '--app', app],
-    'fly secrets set FLY_REGISTRY_AUTH',
-    { input: ghcrRegistryAuth }
   );
 }
 
@@ -150,7 +133,7 @@ export function ensureFlyCertificate(app: string, hostname: string): void {
 
 export function deployFlyImage(app: string, image: string): void {
   process.stdout.write(
-    `[deploy] deploying registered image ${image} to ${app}.\n`
+    `[deploy] deploying public GHCR image ${image} to ${app}.\n`
   );
   runOrExit(
     'flyctl',
@@ -205,14 +188,6 @@ export function resolveFlyDeployOptions(): FlyDeployOptions {
     process.exit(1);
   }
 
-  const ghcrReadToken = process.env['GHCR_READ_TOKEN']?.trim() ?? '';
-  if (ghcrReadToken.length === 0) {
-    process.stderr.write(
-      '[deploy] GHCR_READ_TOKEN is required (GitHub PAT with read:packages from Vault).\n'
-    );
-    process.exit(1);
-  }
-
   const image = process.env['DEPLOY_IMAGE']?.trim();
   if (image === undefined || image.length === 0) {
     process.stderr.write('[deploy] DEPLOY_IMAGE is required in CI deploys.\n');
@@ -226,18 +201,10 @@ export function resolveFlyDeployOptions(): FlyDeployOptions {
     process.exit(1);
   }
 
-  const ghcrUsername =
-    process.env['GHCR_USERNAME']?.trim() ||
-    process.env['GITHUB_REPOSITORY_OWNER']?.trim().toLowerCase() ||
-    GHCR_IMAGE_REPOSITORY.split('/')[1] ||
-    'crvouga';
-
   return {
     app: process.env['FLY_APP']?.trim() || FLY_APP_NAME,
     image,
     vaultToken,
-    ghcrReadToken,
-    ghcrUsername,
   };
 }
 
@@ -245,13 +212,9 @@ export async function runPipelineDeploy(
   options: FlyDeployOptions
 ): Promise<void> {
   const app = options.app ?? FLY_APP_NAME;
-  const ghcrRegistryAuth = buildGhcrRegistryAuth(
-    options.ghcrUsername,
-    options.ghcrReadToken
-  );
 
   ensureFlyApp(app);
-  syncFlySecrets(app, options.vaultToken, ghcrRegistryAuth);
+  syncFlySecrets(app, options.vaultToken);
   ensureFlyCertificate(app, CACHE_PUBLIC_HOSTNAME);
   await syncCloudflareDns(app);
   deployFlyImage(app, options.image);

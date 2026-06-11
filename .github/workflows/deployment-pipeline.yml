@@ -51,8 +51,7 @@ jobs:
             secret/data/personal/dev B2_BUCKET | B2_BUCKET ;
             secret/data/personal/dev VAULT_TOKEN | VAULT_TOKEN ;
             secret/data/personal/dev FLY_API_TOKEN | FLY_API_TOKEN ;
-            secret/data/personal/dev CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
-            secret/data/personal/dev GHCR_READ_TOKEN | GHCR_READ_TOKEN
+            secret/data/personal/dev CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
       - name: Verify Vault secrets (dev)
         env:
           CI: true
@@ -97,8 +96,7 @@ jobs:
             secret/data/personal/prd B2_BUCKET | B2_BUCKET ;
             secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN ;
             secret/data/personal/prd FLY_API_TOKEN | FLY_API_TOKEN ;
-            secret/data/personal/prd CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
-            secret/data/personal/prd GHCR_READ_TOKEN | GHCR_READ_TOKEN
+            secret/data/personal/prd CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
       - name: Verify Vault secrets (prd)
         env:
           CI: true
@@ -121,6 +119,13 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
+      - name: Set GHCR package visibility to public
+        run: |
+          gh api --method PATCH \
+            "/users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}" \
+            -f visibility=public
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Setup flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy to Fly.io
@@ -128,7 +133,6 @@ jobs:
           CI: true
           GITHUB_ACTIONS: true
           DEPLOY_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          GHCR_USERNAME: ${{ github.repository_owner }}
         run: bun run --filter @apps/api deploy
       - name: Smoke test remote cache
         env:
