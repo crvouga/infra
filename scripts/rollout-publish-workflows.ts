@@ -6,7 +6,7 @@
  *   bun run rollout-publish
  *   bun run rollout-publish -- --dry-run
  *   bun run rollout-publish -- --repo crvouga/snake
- *   SETUP_GITHUB_TOKEN=... bun run rollout-publish -- --set-org-dispatch-secret
+ *   GITHUB_TOKEN_SUPER=... bun run rollout-publish -- --set-org-dispatch-secret
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -84,12 +84,12 @@ async function main(): Promise<void> {
   const groups = groupByGithubRepo(config);
 
   const ghToken =
-    process.env["SETUP_GITHUB_TOKEN"]?.trim() ||
+    process.env["GITHUB_TOKEN_SUPER"]?.trim() ||
     process.env["GH_TOKEN"]?.trim() ||
     process.env["GITHUB_TOKEN"]?.trim();
 
   if (args.setOrgDispatchSecret) {
-    if (!ghToken) throw new Error("SETUP_GITHUB_TOKEN required for --set-org-dispatch-secret");
+    if (!ghToken) throw new Error("GITHUB_TOKEN_SUPER required for --set-org-dispatch-secret");
     if (args.dryRun) {
       console.log("[dry-run] Would set org secret DEPLOY_DISPATCH_TOKEN");
     } else {
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       }
 
       if (!ghToken) {
-        throw new Error("SETUP_GITHUB_TOKEN or GH_TOKEN required for push");
+        throw new Error("GITHUB_TOKEN_SUPER or GH_TOKEN required for push");
       }
 
       const cloneDir = join(workRoot, repo.replace("/", "__"));

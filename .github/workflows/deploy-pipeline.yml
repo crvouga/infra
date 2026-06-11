@@ -256,10 +256,10 @@ jobs:
           sudo apt install gh -y
       - name: Trigger portfolio fly-teardown
         env:
-          SETUP_GITHUB_TOKEN: ${{ env.SETUP_GITHUB_TOKEN }}
+          GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${SETUP_GITHUB_TOKEN}"
+          export GH_TOKEN="${GITHUB_TOKEN_SUPER}"
           gh workflow run fly-teardown.yml --repo crvouga/portfolio \
             -f max_teardowns_per_run=15 \
             -f force_teardown=true

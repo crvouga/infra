@@ -9,7 +9,7 @@
  *
  * Env:
  *   DIGITALOCEAN_TOKEN
- *   SETUP_GITHUB_TOKEN  (gh CLI auth for secret set + workflow dispatch)
+ *   GITHUB_TOKEN_SUPER  (gh CLI auth for secret set + workflow dispatch)
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -140,7 +140,7 @@ async function triggerDeploy(ghToken: string, runFlyTeardown: boolean): Promise<
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const doToken = requireEnv("DIGITALOCEAN_TOKEN");
-  const ghToken = requireEnv("SETUP_GITHUB_TOKEN");
+  const ghToken = requireEnv("GITHUB_TOKEN_SUPER");
 
   if (args.skipIfSecretsExist) {
     const exists = await ghSecretExists("NODE_SSH_HOST", ghToken);

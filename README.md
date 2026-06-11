@@ -38,7 +38,7 @@ In `secret/data/personal/prd` on [vault.chrisvouga.dev](https://vault.chrisvouga
 | Key | Purpose |
 |-----|---------|
 | `DIGITALOCEAN_TOKEN` | Create/manage the origin droplet |
-| `SETUP_GITHUB_TOKEN` | PAT with `repo` + `admin:org` — sets `NODE_SSH_*` secrets, triggers workflows, cross-repo dispatch |
+| `GITHUB_TOKEN_SUPER` | PAT with `repo` + `admin:org` — sets `NODE_SSH_*` secrets, triggers workflows, cross-repo dispatch |
 | `CLOUDFLARE_API_TOKEN` | DNS sync (existing) |
 | App secrets | TMDB, Twilio, etc. (existing) |
 
@@ -55,10 +55,10 @@ Skips droplet creation if `NODE_SSH_HOST` secret already exists.
 
 ### 3. Roll out publish workflows to sibling repos
 
-Once locally (requires `gh` CLI + `SETUP_GITHUB_TOKEN`):
+Once locally (requires `gh` CLI + `GITHUB_TOKEN_SUPER`):
 
 ```bash
-export SETUP_GITHUB_TOKEN="ghp_..."
+export GITHUB_TOKEN_SUPER="ghp_..."
 bun run rollout-publish -- --set-org-dispatch-secret
 ```
 

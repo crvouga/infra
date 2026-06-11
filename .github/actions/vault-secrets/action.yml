@@ -18,4 +18,4 @@ runs:
           secret/data/personal/prd TWILIO_AUTH_TOKEN | TWILIO_AUTH_TOKEN ;
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
           secret/data/personal/prd DIGITALOCEAN_TOKEN | DIGITALOCEAN_TOKEN ;
-          secret/data/personal/prd SETUP_GITHUB_TOKEN | SETUP_GITHUB_TOKEN
+          secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER

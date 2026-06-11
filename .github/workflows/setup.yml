@@ -2,7 +2,7 @@ name: Setup
 
 # One-click bootstrap: provision DO droplet (optional) → deploy stack → optional Fly teardown.
 #
-# Vault secrets required: DIGITALOCEAN_TOKEN, SETUP_GITHUB_TOKEN
+# Vault secrets required: DIGITALOCEAN_TOKEN, GITHUB_TOKEN_SUPER
 
 on:
   workflow_dispatch:
@@ -51,7 +51,7 @@ jobs:
       - name: Provision droplet
         if: ${{ inputs.provision_droplet }}
         env:
-          SETUP_GITHUB_TOKEN: ${{ env.SETUP_GITHUB_TOKEN }}
+          GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
           DIGITALOCEAN_TOKEN: ${{ env.DIGITALOCEAN_TOKEN }}
         run: |
           set -euo pipefail
@@ -62,10 +62,10 @@ jobs:
       - name: Trigger deploy-pipeline
         if: ${{ inputs.deploy }}
         env:
-          SETUP_GITHUB_TOKEN: ${{ env.SETUP_GITHUB_TOKEN }}
+          GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${SETUP_GITHUB_TOKEN}"
+          export GH_TOKEN="${GITHUB_TOKEN_SUPER}"
           ARGS=(workflow run deploy-pipeline.yml --repo crvouga/chrisvouga.dev)
           if [ "${{ inputs.decommission_fly }}" = "true" ]; then
             ARGS+=(-f run_fly_teardown=true)
