@@ -160,9 +160,15 @@ jobs:
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
-          if [ -n "${DB_CONNECTION_URI:-}" ]; then
-            echo "DB_CONNECTION_URI=${DB_CONNECTION_URI}" >> "$GITHUB_ENV"
+          if [ -z "${DB_CONNECTION_URI:-}" ]; then
+            echo "ERROR: DB_CONNECTION_URI GitHub secret is not set on this repo" >&2
+            exit 1
           fi
+          {
+            echo "DB_CONNECTION_URI<<EOF"
+            echo "${DB_CONNECTION_URI}"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
       - name: Write service env files
         run: |
           set -euo pipefail
