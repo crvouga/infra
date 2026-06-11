@@ -1,6 +1,6 @@
 import { NODE_SSH_VAULT_KEYS, type NodeSshCredentials } from "./node-ssh.js";
 
-const DEFAULT_VAULT_ADDR = "https://vault.chrisvouga.dev";
+const DEFAULT_VAULT_ADDR = "https://vault-chrisvouga.fly.dev";
 const VAULT_KV_PATH = "secret/data/personal/prd";
 
 function vaultAddr(): string {

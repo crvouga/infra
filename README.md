@@ -35,7 +35,7 @@ Project repos ──▶ ghcr.io (public images)
 
 ### 1. Add Vault secrets
 
-In `secret/data/personal/prd` on [vault.chrisvouga.dev](https://vault.chrisvouga.dev):
+In `secret/data/personal/prd` on [vault-chrisvouga.fly.dev](https://vault-chrisvouga.fly.dev):
 
 | Key | Purpose |
 |-----|---------|

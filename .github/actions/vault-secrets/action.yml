@@ -5,11 +5,11 @@ runs:
   steps:
     - uses: hashicorp/vault-action@v3
       with:
-        url: https://vault.chrisvouga.dev
+        url: https://vault-chrisvouga.fly.dev
         method: jwt
         path: jwt
         role: github-actions
-        jwtGithubAudience: https://vault.chrisvouga.dev
+        jwtGithubAudience: https://vault-chrisvouga.fly.dev
         exportToken: true
         secrets: |
           secret/data/personal/prd CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;

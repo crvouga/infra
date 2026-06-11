@@ -53,7 +53,7 @@ jobs:
         env:
           GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
           DIGITALOCEAN_TOKEN: ${{ env.DIGITALOCEAN_TOKEN }}
-          VAULT_ADDR: https://vault.chrisvouga.dev
+          VAULT_ADDR: https://vault-chrisvouga.fly.dev
           MIGRATE_FROM_LEGACY_NODE_SSH_HOST: ${{ secrets.NODE_SSH_HOST }}
           MIGRATE_FROM_LEGACY_NODE_SSH_USER: ${{ secrets.NODE_SSH_USER }}
           MIGRATE_FROM_LEGACY_NODE_SSH_KEY: ${{ secrets.NODE_SSH_KEY }}

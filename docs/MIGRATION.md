@@ -273,7 +273,7 @@ bun run rollout-publish -- --dry-run # preview CI rollout
 
 ### Vault secrets reference
 
-Path: `secret/data/personal/prd` on [vault.chrisvouga.dev](https://vault.chrisvouga.dev)
+Path: `secret/data/personal/prd` on [vault-chrisvouga.fly.dev](https://vault-chrisvouga.fly.dev)
 
 | Key | Used for |
 |-----|----------|
