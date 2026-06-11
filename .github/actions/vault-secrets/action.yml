@@ -10,7 +10,8 @@ runs:
   steps:
     - uses: hashicorp/vault-action@v3
       with:
-        url: https://vault.chrisvouga.dev
+        # Fly API host until sync-dns provisions vault.chrisvouga.dev on the droplet.
+        url: https://vault-chrisvouga.fly.dev
         method: jwt
         path: jwt
         role: github-actions
@@ -29,7 +30,7 @@ runs:
     - if: ${{ inputs.allow_missing_node_ssh != 'true' }}
       uses: hashicorp/vault-action@v3
       with:
-        url: https://vault.chrisvouga.dev
+        url: https://vault-chrisvouga.fly.dev
         method: jwt
         path: jwt
         role: github-actions

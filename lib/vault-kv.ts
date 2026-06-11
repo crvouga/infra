@@ -1,6 +1,8 @@
 import { NODE_SSH_VAULT_KEYS, type NodeSshCredentials } from "./node-ssh.js";
 
 export const DEFAULT_VAULT_ADDR = "https://vault.chrisvouga.dev";
+/** Fly API host used until custom-domain DNS is live on the droplet. */
+export const FALLBACK_VAULT_ADDR = "https://vault-chrisvouga.fly.dev";
 const VAULT_KV_PATH = "secret/data/personal/prd";
 
 export function resolveVaultAddr(explicit?: string): string {
@@ -10,8 +12,18 @@ export function resolveVaultAddr(explicit?: string): string {
   );
 }
 
-function vaultAddr(): string {
-  return resolveVaultAddr();
+async function vaultAddr(): Promise<string> {
+  const preferred = resolveVaultAddr();
+  try {
+    const res = await fetch(
+      `${preferred}/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (res.ok) return preferred;
+  } catch {
+    /* custom domain unavailable */
+  }
+  return FALLBACK_VAULT_ADDR;
 }
 
 function vaultToken(): string {
@@ -21,7 +33,8 @@ function vaultToken(): string {
 }
 
 export async function vaultKvPatch(fields: Record<string, string>): Promise<void> {
-  const res = await fetch(`${vaultAddr()}/v1/${VAULT_KV_PATH}`, {
+  const addr = await vaultAddr();
+  const res = await fetch(`${addr}/v1/${VAULT_KV_PATH}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${vaultToken()}`,
