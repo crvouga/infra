@@ -1,6 +1,3 @@
-/** Fly.io app name for the cache server. */
-export const FLY_APP_NAME = 'turborepo-remote-cache';
-
 /** Public hostname for the self-hosted Turborepo remote cache server. */
 export const CACHE_PUBLIC_HOSTNAME = 'turborepo.chrisvouga.dev';
 
@@ -13,7 +10,7 @@ export const CACHE_PUBLIC_ORIGIN = `https://${CACHE_PUBLIC_HOSTNAME}`;
 /** GHCR repository for the cache server image (CI publishes via chrisvouga.dev reusable workflow). */
 export const GHCR_IMAGE_REPOSITORY = 'ghcr.io/crvouga/chrisvouga-turborepo';
 
-export type SecretUsedBy = 'server' | 'client' | 'deploy';
+export type SecretUsedBy = 'server' | 'client';
 
 export type SecretDefinition = {
   readonly key: string;
@@ -38,8 +35,6 @@ export const VaultSecretKey = {
   b2S3SecretAccessKey: 'B2_S3_SECRET_ACCESS_KEY',
   b2Bucket: 'B2_BUCKET',
   vaultToken: 'VAULT_TOKEN',
-  flyApiToken: 'FLY_API_TOKEN',
-  cloudflareApiToken: 'CLOUDFLARE_API_TOKEN',
 } as const;
 
 export const VAULT_SECRET_REGISTRY: readonly SecretDefinition[] = [
@@ -96,20 +91,8 @@ export const VAULT_SECRET_REGISTRY: readonly SecretDefinition[] = [
   {
     key: VaultSecretKey.vaultToken,
     required: true,
-    usedBy: ['server', 'deploy'],
-    hint: 'Long-lived Vault read token; CI syncs this to Fly secrets for server boot',
-  },
-  {
-    key: VaultSecretKey.flyApiToken,
-    required: true,
-    usedBy: ['deploy'],
-    hint: 'Fly.io API token with deploy permissions for turborepo-remote-cache',
-  },
-  {
-    key: VaultSecretKey.cloudflareApiToken,
-    required: true,
-    usedBy: ['deploy'],
-    hint: 'Cloudflare API token with Zone.DNS Edit for chrisvouga.dev',
+    usedBy: ['server'],
+    hint: 'Long-lived Vault read token for server boot-time secret loading',
   },
   {
     key: VaultSecretKey.turboCache,

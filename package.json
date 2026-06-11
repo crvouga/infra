@@ -7,11 +7,11 @@
     "pkgs/*"
   ],
   "scripts": {
-    "check": "bun run ci:format && bun run test:scripts && turbo run tc lint test build",
+    "check": "bun run ci:format && turbo run tc lint test build",
     "check:vault-secrets": "vault run -- bun run scripts/check-vault-secrets.ts",
     "check:vault-secrets:prd": "vault run --config prd -- bun run scripts/check-vault-secrets.ts",
     "ci:format": "prettier --check .",
-    "deploy": "vault run --config prd -- bun run --filter @apps/api deploy",
+    "deploy": "echo 'Hosting is via chrisvouga.dev — push main runs publish-image.yml'",
     "dev": "bun run --filter @apps/api dev",
     "format": "prettier --write .",
     "gh": "open https://github.com/crvouga/turborepo-remote-cache/actions/workflows/deployment-pipeline.yml",

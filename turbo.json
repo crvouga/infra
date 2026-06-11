@@ -3,13 +3,7 @@
   "ui": "stream",
   "concurrency": "6",
   "globalDependencies": ["bun.lock", "tsconfig.json", "package.json"],
-  "globalPassThroughEnv": [
-    "CLOUDFLARE_*",
-    "FLY_*",
-    "VAULT_*",
-    "TURBO_*",
-    "DEPLOY_*"
-  ],
+  "globalPassThroughEnv": ["CLOUDFLARE_*", "VAULT_*", "TURBO_*", "DEPLOY_*"],
   "tasks": {
     "setup": {
       "cache": false,
@@ -41,13 +35,9 @@
     },
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**/*.ts", "Dockerfile", "fly.toml"],
+      "inputs": ["src/**/*.ts", "Dockerfile"],
       "outputLogs": "new-only",
       "outputs": []
-    },
-    "deploy": {
-      "dependsOn": ["build"],
-      "cache": false
     },
     "//#ci:format": {
       "inputs": ["$TURBO_DEFAULT$"],
