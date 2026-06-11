@@ -249,9 +249,11 @@ services:
       - ./env/turborepo.env
     environment:
       PORT: "8080"
-      VAULT_ADDR: "https://vault.chrisvouga.dev"
+      VAULT_ADDR: "http://vault:8200"
       VAULT_PROJECT: "personal"
       VAULT_CONFIG: "prd"
+    depends_on:
+      - vault
     labels:
       - traefik.enable=true
       - traefik.http.routers.turborepo.rule=Host(`turborepo.chrisvouga.dev`)

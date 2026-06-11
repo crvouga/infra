@@ -23,6 +23,8 @@ export type ServiceSpec = {
   readonly health_path?: string;
   readonly env?: Readonly<Record<string, string>>;
   readonly secrets?: readonly SecretSpec[];
+  /** Compose service ids this service should start after. */
+  readonly depends_on?: readonly string[];
 };
 
 export type ServicesConfig = {

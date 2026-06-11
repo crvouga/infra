@@ -216,9 +216,11 @@ services:
     health_path: /health
     env:
       PORT: "8080"
-      VAULT_ADDR: "https://vault.chrisvouga.dev"
+      VAULT_ADDR: "http://vault:8200"
       VAULT_PROJECT: "personal"
       VAULT_CONFIG: "prd"
+    depends_on:
+      - vault
     secrets:
       - name: VAULT_TOKEN
         source: vault

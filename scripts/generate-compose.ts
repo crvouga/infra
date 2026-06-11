@@ -48,13 +48,17 @@ function serviceBlock(
     : "";
   const environment =
     envLines.length > 0 ? `    environment:\n${envLines}\n` : "";
+  const dependsOn =
+    service.depends_on && service.depends_on.length > 0
+      ? `    depends_on:\n${service.depends_on.map((d) => `      - ${composeServiceName(d)}`).join("\n")}\n`
+      : "";
 
   return `  ${name}:
     image: ${image}:\${IMAGE_TAG:-${config.default_image_tag}}
     restart: unless-stopped
     networks:
       - web
-${envFile}${environment}${traefikLabels(service)}
+${envFile}${environment}${dependsOn}${traefikLabels(service)}
 `;
 }
 
