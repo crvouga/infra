@@ -16,7 +16,6 @@ runs:
         path: jwt
         role: github-actions
         jwtGithubAudience: https://vault.chrisvouga.dev
-        exportToken: true
         secrets: |
           secret/data/personal/prd CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
           secret/data/personal/prd CLOUDFLARE_ACCOUNT_ID | CLOUDFLARE_ACCOUNT_ID ;
