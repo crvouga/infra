@@ -21,6 +21,7 @@
       "path": "../normalizer.app-1",
     },
     {
+      "name": "llm-server",
       "path": "../llm-server",
     },
   ],
