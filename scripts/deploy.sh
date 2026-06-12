@@ -23,6 +23,42 @@ is_infra_service() {
   ' services.yaml
 }
 
+compose_services() {
+  docker compose config --services
+}
+
+deploy_all_services() {
+  local pull_failed=()
+  local svc
+
+  echo "==> Pull all services (IMAGE_TAG=${IMAGE_TAG})"
+  while IFS= read -r svc; do
+    [[ -z "${svc}" ]] && continue
+    echo "---- pull ${svc}"
+    if ! docker compose pull "${svc}"; then
+      pull_failed+=("${svc}")
+      echo "WARN: pull failed for ${svc}" >&2
+    fi
+  done < <(compose_services)
+
+  echo "==> Up all services"
+  while IFS= read -r svc; do
+    [[ -z "${svc}" ]] && continue
+    if [[ " ${pull_failed[*]:-} " == *" ${svc} "* ]]; then
+      echo "---- skip ${svc} (pull failed)"
+      continue
+    fi
+    echo "---- up ${svc}"
+    docker compose up -d "${svc}"
+  done < <(compose_services)
+
+  if [[ ${#pull_failed[@]} -gt 0 ]]; then
+    echo "ERROR: failed to pull: ${pull_failed[*]}" >&2
+    echo "       publish the image and ensure the ghcr package is public" >&2
+    exit 1
+  fi
+}
+
 if [[ -n "${SERVICE_ID}" ]]; then
   # docker compose service names match service ids (hyphens allowed)
   COMPOSE_SERVICE="${SERVICE_ID}"
@@ -47,10 +83,7 @@ EOF
 else
   rm -f docker-compose.override.yml
   export IMAGE_TAG
-  echo "==> Pull all services (IMAGE_TAG=${IMAGE_TAG})"
-  docker compose pull
-  echo "==> Up all services"
-  docker compose up -d --remove-orphans
+  deploy_all_services
 fi
 
 docker compose ps

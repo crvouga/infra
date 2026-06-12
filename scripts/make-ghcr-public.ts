@@ -10,8 +10,13 @@
 import { loadServicesConfig } from "../lib/services.js";
 
 function token(): string {
-  const t = process.env["GH_TOKEN"]?.trim() || process.env["GITHUB_TOKEN"]?.trim();
-  if (!t) throw new Error("GH_TOKEN or GITHUB_TOKEN is required");
+  const t =
+    process.env["GH_TOKEN"]?.trim() ||
+    process.env["GITHUB_TOKEN_SUPER"]?.trim() ||
+    process.env["GITHUB_TOKEN"]?.trim();
+  if (!t) {
+    throw new Error("GH_TOKEN, GITHUB_TOKEN_SUPER, or GITHUB_TOKEN is required");
+  }
   return t;
 }
 
