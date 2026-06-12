@@ -16,7 +16,8 @@
     "provision-droplet": "bun run scripts/provision-droplet.ts",
     "migrate-node-ssh-to-vault": "bun run scripts/migrate-node-ssh-to-vault.ts",
     "seed-vault-github-secret": "bun run scripts/seed-vault-github-secret.ts",
-    "rollout-publish": "bun run scripts/rollout-publish-workflows.ts"
+    "rollout-publish": "bun run scripts/rollout-publish-workflows.ts",
+    "generate-infra-auth": "bun run scripts/generate-infra-auth.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
