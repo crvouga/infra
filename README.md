@@ -134,11 +134,12 @@ Upstream Docker images defined in `services.yaml` → `infra_services` (not buil
 | [netdata.chrisvouga.dev](https://netdata.chrisvouga.dev) | Host + container metrics | Traefik basic auth (`NETDATA_BASIC_AUTH_USERS`) |
 | [dozzle.chrisvouga.dev](https://dozzle.chrisvouga.dev) | Live Docker logs | Dozzle login (`DOZZLE_USERS_YML`) |
 
-Add these Vault keys before the first full deploy (or run `bun run generate-infra-auth` to print random credentials and Vault values):
+Add these Vault keys before the first full deploy (or run `bun run generate-infra-auth` — no Docker required):
 
 ```bash
 bun run generate-infra-auth
-# optional: write directly to Vault (requires vault login + VAULT_TOKEN)
+# optional: write directly to Vault (requires vault login first)
+vault login
 bun run generate-infra-auth -- --write-vault
 ```
 

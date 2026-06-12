@@ -3,16 +3,14 @@
  * Generate random credentials for Netdata (Traefik basic auth) and Dozzle login.
  * Prints human-readable login details and Vault-ready secret values.
  *
- * Requires Docker for Dozzle users.yml generation.
- *
  * Usage:
  *   bun run generate-infra-auth
  *   bun run generate-infra-auth -- --username admin --email you@example.com
- *   bun run generate-infra-auth -- --write-vault
+ *   bun run generate-infra-auth -- --write-vault   # requires: vault login
  */
-import { vaultKvPatch } from "../lib/vault-kv.js";
+import { vaultKvPatchCli } from "../lib/vault-kv.js";
 
-const DOZZLE_IMAGE = "amir20/dozzle:v8";
+const BCRYPT_COST = 11;
 
 type Args = {
   readonly username: string;
@@ -36,7 +34,7 @@ function parseArgs(argv: readonly string[]): Args {
       console.log(`Usage: bun run generate-infra-auth [--username admin] [--email addr] [--password pass] [--write-vault]
 
 Generates DOZZLE_USERS_YML and NETDATA_BASIC_AUTH_USERS with a random password
-(unless --password is set). Docker is required for the Dozzle users file.`);
+(unless --password is set). No Docker required.`);
       process.exit(0);
     } else {
       console.error(`Unknown argument: ${arg}`);
@@ -56,11 +54,8 @@ function randomPassword(length = 24): string {
   return Array.from(bytes, (b) => charset[b % charset.length]!).join("");
 }
 
-async function requireDocker(): Promise<void> {
-  const probe = Bun.spawn(["docker", "info"], { stdout: "ignore", stderr: "ignore" });
-  if ((await probe.exited) !== 0) {
-    throw new Error("Docker is required to generate Dozzle users.yml (docker info failed)");
-  }
+async function bcryptHash(password: string): Promise<string> {
+  return Bun.password.hash(password, { algorithm: "bcrypt", cost: BCRYPT_COST });
 }
 
 async function generateDozzleUsersYml(
@@ -68,66 +63,27 @@ async function generateDozzleUsersYml(
   password: string,
   email: string,
 ): Promise<string> {
-  const cmd = [
-    "docker",
-    "run",
-    "--rm",
-    DOZZLE_IMAGE,
-    "generate",
-    username,
-    "--password",
-    password,
-  ];
-  if (email) cmd.push("--email", email);
-  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (exitCode !== 0) {
-    throw new Error(`dozzle generate failed: ${stderr.trim() || stdout.trim()}`);
-  }
-  return stdout.trimEnd();
+  const hash = await bcryptHash(password);
+  const lines = ["users:", `  ${username}:`];
+  if (email) lines.push(`    email: ${email}`);
+  lines.push(`    password: ${hash}`);
+  lines.push("    filter:");
+  lines.push("    roles:");
+  return lines.join("\n");
 }
 
+/** Traefik basicAuth accepts bcrypt hashes (same format as htpasswd -nbB). */
 async function generateNetdataBasicAuthUsers(
   username: string,
   password: string,
 ): Promise<string> {
-  const htpasswd = Bun.spawn(["htpasswd", "-nb", username, password], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [htOut, htErr, htCode] = await Promise.all([
-    new Response(htpasswd.stdout).text(),
-    new Response(htpasswd.stderr).text(),
-    htpasswd.exited,
-  ]);
-  if (htCode === 0) return htOut.trimEnd();
-
-  const hashProc = Bun.spawn(["openssl", "passwd", "-apr1", password], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [hashOut, hashErr, hashCode] = await Promise.all([
-    new Response(hashProc.stdout).text(),
-    new Response(hashProc.stderr).text(),
-    hashProc.exited,
-  ]);
-  if (hashCode !== 0) {
-    throw new Error(
-      `Need htpasswd or openssl to generate NETDATA_BASIC_AUTH_USERS (${htErr.trim() || hashErr.trim()})`,
-    );
-  }
-  return `${username}:${hashOut.trimEnd()}`;
+  const hash = await bcryptHash(password);
+  return `${username}:${hash}`;
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const password = args.password ?? randomPassword();
-
-  await requireDocker();
 
   const [dozzleUsersYml, netdataBasicAuthUsers] = await Promise.all([
     generateDozzleUsersYml(args.username, password, args.email),
@@ -153,13 +109,15 @@ Infra monitoring credentials (save these — the password is not stored elsewher
   console.log(netdataBasicAuthUsers);
 
   if (args.writeVault) {
-    await vaultKvPatch({
+    await vaultKvPatchCli({
       DOZZLE_USERS_YML: dozzleUsersYml,
       NETDATA_BASIC_AUTH_USERS: netdataBasicAuthUsers,
     });
     console.log("\nWrote DOZZLE_USERS_YML and NETDATA_BASIC_AUTH_USERS to Vault (personal/prd).");
   } else {
-    console.log("\nTo write both keys to Vault: bun run generate-infra-auth -- --write-vault");
+    console.log(
+      "\nTo write both keys to Vault: vault login && bun run generate-infra-auth -- --write-vault",
+    );
   }
 }
 
