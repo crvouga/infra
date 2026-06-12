@@ -249,6 +249,8 @@ services:
         source: vault
       - name: S3_BUCKET
         source: vault
+      - name: S3_REGION
+        source: vault
       - name: OPENAI_API_KEY
         source: vault
       - name: OBJECT_STORE_PRESIGNED_URL_SECRET
@@ -279,6 +281,8 @@ services:
       - name: S3_SECRET_KEY
         source: vault
       - name: S3_BUCKET
+        source: vault
+      - name: S3_REGION
         source: vault
       - name: OPENAI_API_KEY
         source: vault
