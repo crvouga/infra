@@ -253,12 +253,6 @@ services:
         source: vault
       - name: OPENAI_API_KEY
         source: vault
-      - name: OBJECT_STORE_PRESIGNED_URL_SECRET
-        source: vault
-      - name: GOOGLE_CLIENT_ID
-        source: vault
-      - name: GOOGLE_CLIENT_SECRET
-        source: vault
 
   - id: normalizer-worker
     internal: true

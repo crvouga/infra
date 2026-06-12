@@ -32,9 +32,20 @@ runs:
           secret/data/personal/prd S3_BUCKET | S3_BUCKET ;
           secret/data/personal/prd S3_REGION | S3_REGION ;
           secret/data/personal/prd OPENAI_API_KEY | OPENAI_API_KEY ;
+    - uses: hashicorp/vault-action@v3
+      with:
+        url: https://vault.chrisvouga.dev
+        method: jwt
+        path: jwt
+        role: github-actions
+        jwtGithubAudience: https://vault.chrisvouga.dev
+        ignoreNotFound: true
+        secrets: |
           secret/data/personal/prd OBJECT_STORE_PRESIGNED_URL_SECRET | OBJECT_STORE_PRESIGNED_URL_SECRET ;
           secret/data/personal/prd GOOGLE_CLIENT_ID | GOOGLE_CLIENT_ID ;
-          secret/data/personal/prd GOOGLE_CLIENT_SECRET | GOOGLE_CLIENT_SECRET
+          secret/data/personal/prd GOOGLE_CLIENT_SECRET | GOOGLE_CLIENT_SECRET ;
+          secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_ID | GOOGLE_CLIENT_ID ;
+          secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_SECRET | GOOGLE_CLIENT_SECRET
     - if: ${{ inputs.allow_missing_node_ssh != 'true' }}
       uses: hashicorp/vault-action@v3
       with:
