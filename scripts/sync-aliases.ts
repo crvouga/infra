@@ -142,7 +142,8 @@ async function ensureRedirectRules(
   });
 
   const body = {
-    name: `${alias.zone} alias redirects`,
+    // Phase entrypoint rulesets are named "default" and cannot be renamed on update.
+    name: entrypoint?.name ?? `${alias.zone} alias redirects`,
     kind: "zone" as const,
     phase: REDIRECT_PHASE,
     rules: [...others, ...merged],

@@ -108,7 +108,7 @@ async function ensureRedirectRule(
     console.log(`[plan] CREATE redirect rule ${apex} → ${www}`);
     if (!apply) return;
     const body = {
-      name: `${apex} redirects`,
+      name: entrypoint?.name ?? `${apex} redirects`,
       kind: "zone" as const,
       phase: REDIRECT_PHASE,
       rules: [...others, desired],
