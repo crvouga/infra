@@ -20,6 +20,9 @@
       "name": "normalizer.app-1",
       "path": "../normalizer.app-1",
     },
+    {
+      "path": "../llm-server",
+    },
   ],
   "settings": {
     "cSpell.words": ["sealedcode"],

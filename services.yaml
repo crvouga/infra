@@ -258,6 +258,20 @@ services:
       - name: NORMALIZER_APP_GOOGLE_CLIENT_SECRET
         source: vault
 
+  - id: llm-proxy
+    hostname: llm-proxy.chrisvouga.dev
+    github_repo: crvouga/llm-server
+    source_code_url: https://github.com/crvouga/llm-server
+    dockerfile: proxy/Dockerfile
+    build_context: proxy
+    port: 8080
+    health_check: true
+    env:
+      PORT: "8080"
+    secrets:
+      - name: DATABASE_URL
+        source: vault
+
   - id: normalizer-worker
     internal: true
     github_repo: crvouga/normalizer.app

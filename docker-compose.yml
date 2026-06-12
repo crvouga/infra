@@ -267,6 +267,21 @@ services:
       - traefik.http.routers.normalizer.entrypoints=web
       - traefik.http.routers.normalizer.middlewares=cfproto@docker
       - traefik.http.services.normalizer.loadbalancer.server.port=8080
+  llm-proxy:
+    image: ghcr.io/crvouga/chrisvouga-llm-proxy:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - web
+    env_file:
+      - ./env/llm-proxy.env
+    environment:
+      PORT: "8080"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.llmproxy.rule=Host(`llm-proxy.chrisvouga.dev`)
+      - traefik.http.routers.llmproxy.entrypoints=web
+      - traefik.http.routers.llmproxy.middlewares=cfproto@docker
+      - traefik.http.services.llmproxy.loadbalancer.server.port=8080
   normalizer-worker:
     image: ghcr.io/crvouga/chrisvouga-normalizer-worker:${IMAGE_TAG:-latest}
     restart: unless-stopped
