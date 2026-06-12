@@ -112,11 +112,20 @@ async function main(): Promise<void> {
       if (args.dryRun) {
         console.log("--- publish-image.yml ---");
         console.log(workflow);
+        if (args.setOrgDispatchSecret) {
+          console.log(`[dry-run] Would set DEPLOY_DISPATCH_TOKEN on ${repo}`);
+        }
         continue;
       }
 
       if (!ghToken) {
         throw new Error("GITHUB_TOKEN_SUPER or GH_TOKEN required for push");
+      }
+
+      if (args.setOrgDispatchSecret) {
+        process.env["GH_TOKEN"] = ghToken;
+        await $`gh secret set DEPLOY_DISPATCH_TOKEN --repo ${repo} --body ${ghToken}`.quiet();
+        console.log(`  set DEPLOY_DISPATCH_TOKEN on ${repo}`);
       }
 
       const cloneDir = join(workRoot, repo.replace("/", "__"));
