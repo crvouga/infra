@@ -1,19 +1,23 @@
 {
   "folders": [
     {
-      "path": "../portfolio",
-    },
-    {
       "name": "chrisvouga.dev",
       "path": ".",
     },
     {
+      "name": "portfolio",
+      "path": "../portfolio",
+    },
+    {
+      "name": "turborepo-remote-cache",
       "path": "../turborepo-remote-cache",
     },
     {
+      "name": "vault",
       "path": "../vault",
     },
     {
+      "name": "normalizer.app-1",
       "path": "../normalizer.app-1",
     },
   ],

@@ -37,6 +37,24 @@ export type ServiceSpec = {
   readonly depends_on?: readonly string[];
 };
 
+/** Upstream Docker image — no GHCR build; defined in chrisvouga.dev only. */
+export type InfraServiceSpec = {
+  readonly id: string;
+  readonly hostname: string;
+  readonly image: string;
+  readonly port: number;
+  readonly health_check: boolean;
+  readonly health_path?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly volumes?: readonly string[];
+  readonly cap_add?: readonly string[];
+  readonly security_opt?: readonly string[];
+  readonly pid?: string;
+  readonly secrets?: readonly SecretSpec[];
+  /** Extra Traefik middleware refs appended after cfproto@docker (e.g. netdata-auth@file). */
+  readonly traefik_middlewares?: readonly string[];
+};
+
 export type ServicesConfig = {
   readonly zone: string;
   readonly origin_hostname: string;
@@ -45,6 +63,7 @@ export type ServicesConfig = {
   readonly skip_rollout_repos?: readonly string[];
   readonly aliases?: readonly AliasSpec[];
   readonly services: readonly ServiceSpec[];
+  readonly infra_services?: readonly InfraServiceSpec[];
 };
 
 export function isPublicService(service: ServiceSpec): boolean {
@@ -84,6 +103,11 @@ export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
       }
     }
   }
+  for (const service of raw.infra_services ?? []) {
+    if (!service.hostname || service.port == null || !service.image) {
+      throw new Error(`Infra service "${service.id}" missing hostname, port, or image`);
+    }
+  }
   return raw;
 }
 
@@ -92,6 +116,34 @@ export function findService(
   id: string,
 ): ServiceSpec | undefined {
   return config.services.find((s) => s.id === id);
+}
+
+export function findInfraService(
+  config: ServicesConfig,
+  id: string,
+): InfraServiceSpec | undefined {
+  return config.infra_services?.find((s) => s.id === id);
+}
+
+export function isInfraService(config: ServicesConfig, id: string): boolean {
+  return findInfraService(config, id) != null;
+}
+
+export type DnsTarget = { readonly id: string; readonly hostname: string };
+
+/** Public app + infra hostnames for Cloudflare DNS sync. */
+export function allDnsTargets(config: ServicesConfig): readonly DnsTarget[] {
+  const app: DnsTarget[] = [];
+  for (const service of config.services) {
+    if (isPublicService(service) && service.hostname) {
+      app.push({ id: service.id, hostname: service.hostname });
+    }
+  }
+  const infra = (config.infra_services ?? []).map((s) => ({
+    id: s.id,
+    hostname: s.hostname,
+  }));
+  return [...app, ...infra];
 }
 
 export function recordName(hostname: string, zone: string): string {
@@ -104,6 +156,14 @@ export function allVaultSecretNames(config: ServicesConfig): readonly string[] {
     for (const secret of service.secrets ?? []) {
       if (secret.source === "vault") names.add(secret.name);
     }
+  }
+  for (const service of config.infra_services ?? []) {
+    for (const secret of service.secrets ?? []) {
+      if (secret.source === "vault") names.add(secret.name);
+    }
+  }
+  if ((config.infra_services ?? []).some((s) => s.id === "netdata")) {
+    names.add("NETDATA_BASIC_AUTH_USERS");
   }
   return [...names].sort();
 }

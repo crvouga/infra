@@ -7,6 +7,11 @@ networks:
   web:
     name: chrisvouga-web
 
+volumes:
+  netdatacache:
+  netdataconfig:
+  netdatalib:
+
 services:
   traefik:
     image: traefik:v3.6.6
@@ -18,6 +23,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
     networks:
       - web
     labels:
@@ -272,3 +278,50 @@ services:
       NODE_ENV: "production"
     depends_on:
       - normalizer
+
+  netdata:
+    image: netdata/netdata:stable
+    restart: unless-stopped
+    networks:
+      - web
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - netdataconfig:/etc/netdata
+      - netdatalib:/var/lib/netdata
+      - netdatacache:/var/cache/netdata
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/log:/host/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.netdata.rule=Host(`netdata.chrisvouga.dev`)
+      - traefik.http.routers.netdata.entrypoints=web
+      - traefik.http.routers.netdata.middlewares=cfproto@docker,netdata-auth@file
+      - traefik.http.services.netdata.loadbalancer.server.port=19999
+  dozzle:
+    image: amir20/dozzle:v8
+    restart: unless-stopped
+    networks:
+      - web
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dozzle/users.yml:/data/users.yml:ro
+    environment:
+      DOZZLE_HOSTNAME: "dozzle.chrisvouga.dev"
+      DOZZLE_AUTH_PROVIDER: "simple"
+      DOZZLE_NO_ANALYTICS: "true"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.dozzle.rule=Host(`dozzle.chrisvouga.dev`)
+      - traefik.http.routers.dozzle.entrypoints=web
+      - traefik.http.routers.dozzle.middlewares=cfproto@docker
+      - traefik.http.services.dozzle.loadbalancer.server.port=8080

@@ -14,7 +14,11 @@
  *   bun run scripts/sync-dns.ts --id pickflix --apply
  */
 import { CloudflareApi, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
-import { loadServicesConfig, isPublicService, type ServiceSpec } from "../lib/services.js";
+import {
+  allDnsTargets,
+  loadServicesConfig,
+  type DnsTarget,
+} from "../lib/services.js";
 
 type Args = {
   readonly ids: readonly string[];
@@ -57,11 +61,12 @@ function nodeIp(): string {
   return ip;
 }
 
-function servicesFromArgs(config: ReturnType<typeof loadServicesConfig>, args: Args): readonly ServiceSpec[] {
-  if (args.ids.length === 0) return config.services;
-  const out: ServiceSpec[] = [];
+function servicesFromArgs(config: ReturnType<typeof loadServicesConfig>, args: Args): readonly DnsTarget[] {
+  if (args.ids.length === 0) return allDnsTargets(config);
+  const all = allDnsTargets(config);
+  const out: DnsTarget[] = [];
   for (const id of args.ids) {
-    const s = config.services.find((x) => x.id === id);
+    const s = all.find((x) => x.id === id);
     if (!s) {
       console.error(`No service with id "${id}"`);
       process.exit(1);
@@ -104,7 +109,7 @@ async function reconcileSslMode(
 async function planActions(
   records: readonly CloudflareDnsRecord[],
   config: ReturnType<typeof loadServicesConfig>,
-  services: readonly ServiceSpec[],
+  services: readonly DnsTarget[],
   args: Args,
 ): Promise<readonly Action[]> {
   const byName = new Map<string, CloudflareDnsRecord[]>();
@@ -144,7 +149,6 @@ async function planActions(
   }
 
   for (const service of services) {
-    if (!isPublicService(service) || !service.hostname) continue;
     desiredNames.add(service.hostname);
     const existing = byName.get(service.hostname) ?? [];
     const cnames = existing.filter((r) => r.type === "CNAME");

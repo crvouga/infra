@@ -253,6 +253,10 @@ services:
         source: vault
       - name: OPENAI_API_KEY
         source: vault
+      - name: NORMALIZER_APP_GOOGLE_CLIENT_ID
+        source: vault
+      - name: NORMALIZER_APP_GOOGLE_CLIENT_SECRET
+        source: vault
 
   - id: normalizer-worker
     internal: true
@@ -287,3 +291,45 @@ aliases:
       - normalizer.app
       - www.normalizer.app
     target: normalizer.chrisvouga.dev
+
+infra_services:
+  - id: netdata
+    hostname: netdata.chrisvouga.dev
+    image: netdata/netdata:stable
+    port: 19999
+    health_check: false
+    traefik_middlewares:
+      - netdata-auth@file
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - netdataconfig:/etc/netdata
+      - netdatalib:/var/lib/netdata
+      - netdatacache:/var/cache/netdata
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/log:/host/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  - id: dozzle
+    hostname: dozzle.chrisvouga.dev
+    image: amir20/dozzle:v8
+    port: 8080
+    health_check: false
+    env:
+      DOZZLE_HOSTNAME: dozzle.chrisvouga.dev
+      DOZZLE_AUTH_PROVIDER: simple
+      DOZZLE_NO_ANALYTICS: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dozzle/users.yml:/data/users.yml:ro
+    secrets:
+      - name: DOZZLE_USERS_YML
+        source: vault

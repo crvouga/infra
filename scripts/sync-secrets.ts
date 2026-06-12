@@ -3,6 +3,8 @@
  * Resolve secrets from env (Vault-injected in CI) and write per-service .env files
  * for docker compose. CI SCPs the env/ directory to the node.
  *
+ * Infra services may also write auth files (dozzle/users.yml, traefik/dynamic/netdata-auth.yml).
+ *
  * Usage:
  *   bun run scripts/sync-secrets.ts
  *   bun run scripts/sync-secrets.ts --id pickflix
@@ -11,8 +13,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  findInfraService,
   findService,
   loadServicesConfig,
+  type InfraServiceSpec,
   type SecretSpec,
   type ServiceSpec,
 } from "../lib/services.js";
@@ -46,6 +50,15 @@ function resolveSecret(spec: SecretSpec): string | null {
   return value || null;
 }
 
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    console.error(`Missing vault secret in environment: ${name}`);
+    process.exit(1);
+  }
+  return value;
+}
+
 function writeServiceEnv(service: ServiceSpec, outputDir: string): void {
   const secrets = service.secrets ?? [];
   if (secrets.length === 0) return;
@@ -70,41 +83,117 @@ function writeServiceEnv(service: ServiceSpec, outputDir: string): void {
 
   mkdirSync(outputDir, { recursive: true, mode: 0o755 });
   const path = join(outputDir, `${service.id}.env`);
-  // 0o644 so appleboy/scp-action (docker, non-runner uid) can tar files on the Actions runner.
   writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o644 });
   console.log(`  wrote ${path} (${lines.length} vars)`);
+}
+
+function writeDozzleUsers(service: InfraServiceSpec): void {
+  const hasSecret = (service.secrets ?? []).some((s) => s.name === "DOZZLE_USERS_YML");
+  if (!hasSecret) return;
+  const content = requireEnv("DOZZLE_USERS_YML");
+  mkdirSync("dozzle", { recursive: true, mode: 0o755 });
+  writeFileSync("dozzle/users.yml", `${content}\n`, { mode: 0o644 });
+  console.log("  wrote dozzle/users.yml");
+}
+
+function writeNetdataAuth(infra: readonly InfraServiceSpec[]): void {
+  if (!infra.some((s) => s.id === "netdata")) return;
+  const user = requireEnv("NETDATA_BASIC_AUTH_USERS");
+  mkdirSync("traefik/dynamic", { recursive: true, mode: 0o755 });
+  const content = `http:
+  middlewares:
+    netdata-auth:
+      basicAuth:
+        users:
+          - "${user.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"
+`;
+  writeFileSync("traefik/dynamic/netdata-auth.yml", content, { mode: 0o644 });
+  console.log("  wrote traefik/dynamic/netdata-auth.yml");
+}
+
+function collectRequiredVault(
+  services: readonly ServiceSpec[],
+  infra: readonly InfraServiceSpec[],
+): Set<string> {
+  const names = new Set<string>();
+  for (const service of services) {
+    for (const spec of service.secrets ?? []) {
+      if (spec.source === "vault") names.add(spec.name);
+    }
+  }
+  for (const service of infra) {
+    for (const spec of service.secrets ?? []) {
+      if (spec.source === "vault") names.add(spec.name);
+    }
+    if (service.id === "netdata") names.add("NETDATA_BASIC_AUTH_USERS");
+  }
+  return names;
+}
+
+function infraToWriteForVault(
+  args: Args,
+  config: ReturnType<typeof loadServicesConfig>,
+  selectedInfra: readonly InfraServiceSpec[],
+): readonly InfraServiceSpec[] {
+  if (args.ids.length === 0) return config.infra_services ?? [];
+  return selectedInfra;
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const config = loadServicesConfig();
-  const services =
-    args.ids.length === 0
-      ? config.services.filter((s) => (s.secrets?.length ?? 0) > 0)
-      : args.ids.map((id) => {
-          const s = findService(config, id);
-          if (!s) {
-            console.error(`No service with id "${id}"`);
-            process.exit(1);
-          }
-          return s;
-        });
+  mkdirSync("dozzle", { recursive: true, mode: 0o755 });
+  mkdirSync("traefik/dynamic", { recursive: true, mode: 0o755 });
 
-  const requiredVault = new Set<string>();
-  for (const service of services) {
-    for (const spec of service.secrets ?? []) {
-      if (spec.source === "vault") requiredVault.add(spec.name);
+  let services: ServiceSpec[];
+  let infra: readonly InfraServiceSpec[];
+
+  if (args.ids.length === 0) {
+    services = config.services.filter((s) => (s.secrets?.length ?? 0) > 0);
+    infra = config.infra_services ?? [];
+  } else {
+    services = [];
+    const selectedInfra: InfraServiceSpec[] = [];
+    for (const id of args.ids) {
+      const app = findService(config, id);
+      if (app) {
+        services.push(app);
+        continue;
+      }
+      const inf = findInfraService(config, id);
+      if (inf) {
+        selectedInfra.push(inf);
+        continue;
+      }
+      console.error(`No service with id "${id}"`);
+      process.exit(1);
     }
+    infra = selectedInfra;
   }
+
+  const requiredVault = collectRequiredVault(services, infraToWriteForVault(args, config, infra));
   const missingVault = [...requiredVault].filter((n) => !process.env[n]?.trim());
   if (missingVault.length > 0) {
     console.error(`Missing vault secrets in environment: ${missingVault.join(", ")}`);
     process.exit(1);
   }
 
-  console.log(`Sync secrets → ${args.outputDir} (${services.length} service(s))`);
+  console.log(
+    `Sync secrets → ${args.outputDir} (${services.length} app, ${infra.length} infra)`,
+  );
   for (const service of services) {
     writeServiceEnv(service, args.outputDir);
+  }
+
+  const syncAllInfra = args.ids.length === 0;
+  const infraToWrite =
+    syncAllInfra ? (config.infra_services ?? []) : infra;
+
+  for (const service of infraToWrite) {
+    writeDozzleUsers(service);
+  }
+  if (syncAllInfra || args.ids.includes("netdata")) {
+    writeNetdataAuth(infraToWrite);
   }
 }
 

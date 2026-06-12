@@ -45,6 +45,8 @@ In `secret/data/personal/prd` on [vault-chrisvouga.fly.dev](https://vault-chrisv
 | `CHRISVOUGA_DEV_NODE_SSH_USER` | SSH user, typically `root` (auto-written) |
 | `CHRISVOUGA_DEV_NODE_SSH_KEY` | SSH private key (auto-written) |
 | `CLOUDFLARE_API_TOKEN` | DNS sync (existing) |
+| `DOZZLE_USERS_YML` | Dozzle login file — see [Infra monitoring](#infra-monitoring) |
+| `NETDATA_BASIC_AUTH_USERS` | Traefik basic auth for Netdata — `htpasswd -nb admin 'password'` |
 | App secrets | TMDB, Twilio, etc. (existing) |
 
 Node SSH credentials live in shared Vault — provisioning writes them automatically. The `github-actions` Vault role needs `patch` on `secret/data/personal/prd`. CI connects to [vault-chrisvouga.fly.dev](https://vault-chrisvouga.fly.dev) but JWT `aud` remains `https://vault.chrisvouga.dev` until the Vault role is updated.
@@ -80,18 +82,12 @@ bun run rollout-publish -- --repo crvouga/snake  # single repo
 
 Sibling repo pushes trigger `repository_dispatch` → **Deploy Pipeline** per service. Monitor health-check in Actions.
 
-### 5. Decommission Fly (when ready)
-
-Run **Setup** again with `decommission_fly: true`, or **Deploy Pipeline** with `run_fly_teardown: true`.
-
-This triggers [`fly-teardown.yml`](https://github.com/crvouga/portfolio/blob/main/.github/workflows/fly-teardown.yml) in the portfolio repo.
-
 ## Layout
 
 | Path | Purpose |
 |------|---------|
 | [`services.yaml`](services.yaml) | Hostnames, ports, images, repo URLs, build paths, secrets |
-| [`docker-compose.yml`](docker-compose.yml) | Generated Traefik + 15 image-only services |
+| [`docker-compose.yml`](docker-compose.yml) | Generated Traefik + app services + infra (Netdata, Dozzle) |
 | [`traefik/traefik.yml`](traefik/traefik.yml) | HTTP-only edge proxy |
 | [`scripts/provision-droplet.ts`](scripts/provision-droplet.ts) | DO droplet + GitHub secret wiring |
 | [`scripts/rollout-publish-workflows.ts`](scripts/rollout-publish-workflows.ts) | Push CI to all project repos |
@@ -111,7 +107,7 @@ bun run generate-compose
 | Workflow | Trigger | Behavior |
 |----------|---------|----------|
 | **Setup** | `workflow_dispatch` | Provision droplet → trigger deploy |
-| **Deploy Pipeline** | push / dispatch / `workflow_dispatch` | Full deploy + optional fly-teardown |
+| **Deploy Pipeline** | push / dispatch / `workflow_dispatch` | Full deploy |
 | **Provision node** | `workflow_dispatch` | Droplet only |
 | Per-repo **publish-image** | push to `main` | Build ghcr image → dispatch deploy |
 
@@ -128,3 +124,24 @@ bun run make-ghcr-public
 ## Cloudflare SSL
 
 Set SSL/TLS mode to **Flexible** — origin serves HTTP on port 80; Cloudflare serves HTTPS to visitors. (`dns-sync --apply` sets this automatically.)
+
+## Infra monitoring
+
+Upstream Docker images defined in `services.yaml` → `infra_services` (not built via GHCR):
+
+| URL | Tool | Auth |
+|-----|------|------|
+| [netdata.chrisvouga.dev](https://netdata.chrisvouga.dev) | Host + container metrics | Traefik basic auth (`NETDATA_BASIC_AUTH_USERS`) |
+| [dozzle.chrisvouga.dev](https://dozzle.chrisvouga.dev) | Live Docker logs | Dozzle login (`DOZZLE_USERS_YML`) |
+
+Add these Vault keys before the first full deploy:
+
+```bash
+# Dozzle users file
+docker run --rm amir20/dozzle generate admin --password 'your-password' --email you@example.com
+
+# Netdata Traefik basic auth (single line, paste into Vault)
+htpasswd -nb admin 'your-password'
+```
+
+Both services use `health_check: false` (auth blocks CI probes). After deploy, verify the URLs manually in a browser.

@@ -204,27 +204,9 @@ docker compose -f /opt/chrisvouga/docker-compose.yml logs -f traefik
 
 ---
 
-## Step 6 — Decommission Fly.io
+## Step 6 — Decommission Fly.io (completed)
 
-**Only after** all services pass health-check and you have verified URLs in the browser.
-
-### Option A — Setup workflow
-
-Actions → **Setup** → Run workflow:
-
-- `provision_droplet`: `false`
-- `deploy`: `true`
-- `decommission_fly`: `true`
-
-### Option B — Deploy Pipeline directly
-
-Actions → **Deploy Pipeline** → Run workflow:
-
-- `run_fly_teardown`: `true`
-
-Both trigger [`fly-teardown.yml`](https://github.com/crvouga/portfolio/blob/main/.github/workflows/fly-teardown.yml) in the portfolio repo, which destroys Fly apps registered in `projects.ts` (up to 15 per run).
-
-Monitor the portfolio **Fly teardown** workflow. Confirm apps are gone in the [Fly dashboard](https://fly.io/dashboard).
+Fly.io side-project apps were migrated to the single-node Docker stack. Automated fly-teardown via the portfolio repo has been removed. If any legacy `chrisvouga-*` Fly apps remain, destroy them manually in the [Fly dashboard](https://fly.io/dashboard). `vault-chrisvouga` is intentionally kept on Fly.
 
 ---
 
@@ -303,7 +285,6 @@ Copy and track progress:
 - [ ] All 15 ghcr images exist and are public
 - [ ] Deploy Pipeline `health-check` green for all services
 - [ ] Manual browser check on key hostnames
-- [ ] Fly teardown run and Fly apps removed
 
 ---
 
