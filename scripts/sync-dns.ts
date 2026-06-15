@@ -6,7 +6,7 @@
  *   origin.<zone>  A      → CHRISVOUGA_DEV_NODE_SSH_HOST (droplet IP)
  *   <hostname>     CNAME  → origin.<zone>  (proxied=true by default)
  *
- * Prunes orphan CNAMEs pointing at *.fly.dev.
+ * Prunes orphan CNAMEs pointing at legacy hosting suffixes.
  *
  * Usage:
  *   bun run scripts/sync-dns.ts
@@ -82,7 +82,8 @@ type Action =
   | { readonly kind: "delete"; readonly name: string; readonly recordId: string; readonly reason: string }
   | { readonly kind: "ok"; readonly name: string };
 
-const FLY_SUFFIX = ".fly.dev";
+/** Legacy CNAME target suffix from prior hosting — pruned when no longer in services.yaml. */
+const LEGACY_ORPHAN_SUFFIX = ".fly.dev";
 /** Origin serves HTTP :80 only — Cloudflare must use Flexible, not Full. */
 const DESIRED_SSL_MODE = "flexible";
 
@@ -190,14 +191,14 @@ async function planActions(
   if (args.pruneOrphans) {
     for (const r of records) {
       if (r.type !== "CNAME") continue;
-      if (!r.content.endsWith(FLY_SUFFIX)) continue;
+      if (!r.content.endsWith(LEGACY_ORPHAN_SUFFIX)) continue;
       if (desiredNames.has(r.name)) continue;
       if (!r.name.endsWith(config.zone) && !r.name.includes(`.${config.zone}`)) continue;
       actions.push({
         kind: "delete",
         name: r.name,
         recordId: r.id,
-        reason: `orphan fly.dev CNAME → ${r.content}`,
+        reason: `legacy orphan CNAME → ${r.content}`,
       });
     }
   }

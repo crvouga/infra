@@ -331,6 +331,11 @@ infra_services:
       - /etc/os-release:/host/etc/os-release:ro
       - /var/log:/host/var/log:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    secrets:
+      - name: NETDATA_USERNAME
+        source: vault
+      - name: NETDATA_PASSWORD
+        source: vault
 
   - id: dozzle
     hostname: dozzle.chrisvouga.dev
@@ -345,5 +350,7 @@ infra_services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./dozzle/users.yml:/data/users.yml:ro
     secrets:
-      - name: DOZZLE_USERS_YML
+      - name: DOZZLE_USERNAME
+        source: vault
+      - name: DOZZLE_PASSWORD
         source: vault

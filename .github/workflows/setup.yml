@@ -1,6 +1,6 @@
 name: Setup
 
-# One-click bootstrap: provision DO droplet (optional) → deploy stack (includes Fly teardown).
+# One-click bootstrap: provision DO droplet (optional) → deploy stack.
 #
 # Vault secrets required: DIGITALOCEAN_TOKEN, GITHUB_TOKEN_SUPER
 

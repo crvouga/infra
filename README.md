@@ -29,13 +29,11 @@ Project repos ──▶ ghcr.io (public images)
                  *.chrisvouga.dev
 ```
 
-**Setup succeeded?** Continue with the step-by-step migration guide: [`docs/MIGRATION.md`](docs/MIGRATION.md).
-
 ## Automated first deploy (5 steps)
 
 ### 1. Add Vault secrets
 
-In `secret/data/personal/prd` on [vault-chrisvouga.fly.dev](https://vault-chrisvouga.fly.dev):
+In `secret/data/personal/prd` on [vault.chrisvouga.dev](https://vault.chrisvouga.dev):
 
 | Key | Purpose |
 |-----|---------|
@@ -45,11 +43,14 @@ In `secret/data/personal/prd` on [vault-chrisvouga.fly.dev](https://vault-chrisv
 | `CHRISVOUGA_DEV_NODE_SSH_USER` | SSH user, typically `root` (auto-written) |
 | `CHRISVOUGA_DEV_NODE_SSH_KEY` | SSH private key (auto-written) |
 | `CLOUDFLARE_API_TOKEN` | DNS sync (existing) |
-| `DOZZLE_USERS_YML` | Dozzle login file — see [Infra monitoring](#infra-monitoring) |
-| `NETDATA_BASIC_AUTH_USERS` | Traefik basic auth for Netdata — `htpasswd -nb admin 'password'` |
+| `NETDATA_USERNAME` | Netdata Traefik basic auth user — see [Infra monitoring](#infra-monitoring) |
+| `NETDATA_PASSWORD` | Netdata password (plain; bcrypt-hashed at deploy) |
+| `DOZZLE_USERNAME` | Dozzle login user |
+| `DOZZLE_PASSWORD` | Dozzle password (plain; bcrypt-hashed at deploy) |
+| `DOZZLE_EMAIL` | Optional Dozzle user email |
 | App secrets | TMDB, Twilio, etc. (existing) |
 
-Node SSH credentials live in shared Vault — provisioning writes them automatically. The `github-actions` Vault role needs `patch` on `secret/data/personal/prd`. CI connects to [vault-chrisvouga.fly.dev](https://vault-chrisvouga.fly.dev) but JWT `aud` remains `https://vault.chrisvouga.dev` until the Vault role is updated.
+Node SSH credentials live in shared Vault — provisioning writes them automatically. The `github-actions` Vault role needs `patch` on `secret/data/personal/prd`.
 
 ### 2. Run Setup workflow
 
@@ -131,26 +132,23 @@ Upstream Docker images defined in `services.yaml` → `infra_services` (not buil
 
 | URL | Tool | Auth |
 |-----|------|------|
-| [netdata.chrisvouga.dev](https://netdata.chrisvouga.dev) | Host + container metrics | Traefik basic auth (`NETDATA_BASIC_AUTH_USERS`) |
-| [dozzle.chrisvouga.dev](https://dozzle.chrisvouga.dev) | Live Docker logs | Dozzle login (`DOZZLE_USERS_YML`) |
+| [netdata.chrisvouga.dev](https://netdata.chrisvouga.dev) | Host + container metrics | Traefik basic auth (`NETDATA_USERNAME`, `NETDATA_PASSWORD`) |
+| [dozzle.chrisvouga.dev](https://dozzle.chrisvouga.dev) | Live Docker logs | Dozzle login (`DOZZLE_USERNAME`, `DOZZLE_PASSWORD`) |
 
-Add these Vault keys before the first full deploy (or run `bun run generate-infra-auth` — no Docker required):
+Passwords are stored plain in Vault and bcrypt-hashed at deploy by `sync-secrets`. Add these keys before the first full deploy (or run `bun run generate-infra-auth` — no Docker required):
 
 ```bash
 bun run generate-infra-auth
 # optional: write directly to Vault (requires vault login first)
 vault login
 bun run generate-infra-auth -- --write-vault
-```
 
-Manual generation:
-
-```bash
-# Dozzle users file
-docker run --rm amir20/dozzle generate admin --password 'your-password' --email you@example.com
-
-# Netdata Traefik basic auth (single line, paste into Vault)
-htpasswd -nb admin 'your-password'
+# per-service credentials (defaults: admin + random passwords)
+bun run generate-infra-auth -- \
+  --netdata-username admin --netdata-password '<pass>' \
+  --dozzle-username admin --dozzle-password '<pass>' \
+  --dozzle-email you@example.com \
+  --write-vault
 ```
 
 Both services use `health_check: false` (auth blocks CI probes). After deploy, verify the URLs manually in a browser.

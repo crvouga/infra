@@ -1,0 +1,5 @@
+users:
+  admin:
+    password: $2b$11$D9i.lMw6/nSI0WcuGNUgkuIzQpJWFdid7O9IeikMxucWOQGsOh8.a
+    filter:
+    roles:

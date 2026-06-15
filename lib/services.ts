@@ -162,9 +162,6 @@ export function allVaultSecretNames(config: ServicesConfig): readonly string[] {
       if (secret.source === "vault") names.add(secret.name);
     }
   }
-  if ((config.infra_services ?? []).some((s) => s.id === "netdata")) {
-    names.add("NETDATA_BASIC_AUTH_USERS");
-  }
   return [...names].sort();
 }
 

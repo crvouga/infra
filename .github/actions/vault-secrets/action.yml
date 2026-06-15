@@ -34,8 +34,11 @@ runs:
           secret/data/personal/prd OPENAI_API_KEY | OPENAI_API_KEY ;
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_ID | NORMALIZER_APP_GOOGLE_CLIENT_ID ;
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_SECRET | NORMALIZER_APP_GOOGLE_CLIENT_SECRET ;
-          secret/data/personal/prd DOZZLE_USERS_YML | DOZZLE_USERS_YML ;
-          secret/data/personal/prd NETDATA_BASIC_AUTH_USERS | NETDATA_BASIC_AUTH_USERS ;
+          secret/data/personal/prd NETDATA_USERNAME | NETDATA_USERNAME ;
+          secret/data/personal/prd NETDATA_PASSWORD | NETDATA_PASSWORD ;
+          secret/data/personal/prd DOZZLE_USERNAME | DOZZLE_USERNAME ;
+          secret/data/personal/prd DOZZLE_PASSWORD | DOZZLE_PASSWORD ;
+          secret/data/personal/prd DOZZLE_EMAIL | DOZZLE_EMAIL ;
     - if: ${{ inputs.allow_missing_node_ssh != 'true' }}
       uses: hashicorp/vault-action@v3
       with:

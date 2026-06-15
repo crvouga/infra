@@ -20,6 +20,7 @@ import {
   type SecretSpec,
   type ServiceSpec,
 } from "../lib/services.js";
+import { buildDozzleUsersYml, buildNetdataBasicAuthUser } from "../lib/infra-auth.js";
 
 type Args = {
   readonly ids: readonly string[];
@@ -87,18 +88,23 @@ function writeServiceEnv(service: ServiceSpec, outputDir: string): void {
   console.log(`  wrote ${path} (${lines.length} vars)`);
 }
 
-function writeDozzleUsers(service: InfraServiceSpec): void {
-  const hasSecret = (service.secrets ?? []).some((s) => s.name === "DOZZLE_USERS_YML");
+async function writeDozzleUsers(service: InfraServiceSpec): Promise<void> {
+  const hasSecret = (service.secrets ?? []).some((s) => s.name === "DOZZLE_USERNAME");
   if (!hasSecret) return;
-  const content = requireEnv("DOZZLE_USERS_YML");
+  const username = requireEnv("DOZZLE_USERNAME");
+  const password = requireEnv("DOZZLE_PASSWORD");
+  const email = process.env.DOZZLE_EMAIL?.trim() ?? "";
+  const content = await buildDozzleUsersYml(username, password, email);
   mkdirSync("dozzle", { recursive: true, mode: 0o755 });
   writeFileSync("dozzle/users.yml", `${content}\n`, { mode: 0o644 });
   console.log("  wrote dozzle/users.yml");
 }
 
-function writeNetdataAuth(infra: readonly InfraServiceSpec[]): void {
+async function writeNetdataAuth(infra: readonly InfraServiceSpec[]): Promise<void> {
   if (!infra.some((s) => s.id === "netdata")) return;
-  const user = requireEnv("NETDATA_BASIC_AUTH_USERS");
+  const username = requireEnv("NETDATA_USERNAME");
+  const password = requireEnv("NETDATA_PASSWORD");
+  const user = await buildNetdataBasicAuthUser(username, password);
   mkdirSync("traefik/dynamic", { recursive: true, mode: 0o755 });
   const content = `http:
   middlewares:
@@ -125,7 +131,6 @@ function collectRequiredVault(
     for (const spec of service.secrets ?? []) {
       if (spec.source === "vault") names.add(spec.name);
     }
-    if (service.id === "netdata") names.add("NETDATA_BASIC_AUTH_USERS");
   }
   return names;
 }
@@ -190,10 +195,10 @@ async function main(): Promise<void> {
     syncAllInfra ? (config.infra_services ?? []) : infra;
 
   for (const service of infraToWrite) {
-    writeDozzleUsers(service);
+    await writeDozzleUsers(service);
   }
   if (syncAllInfra || args.ids.includes("netdata")) {
-    writeNetdataAuth(infraToWrite);
+    await writeNetdataAuth(infraToWrite);
   }
 }
 
