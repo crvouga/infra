@@ -3,14 +3,12 @@
     "chrisvouga",
     "Dockerfiles",
     "dorny",
-    "flyctl",
     "lockfiles",
     "Makefiles",
     "openbao",
     "pipefail",
     "pkey",
     "psql",
-    "superfly",
     "TIMESTAMPTZ"
   ]
 }

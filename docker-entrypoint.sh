@@ -7,6 +7,11 @@ if [ -z "${DB_CONNECTION_URI:-}" ]; then
   exit 1
 fi
 
+if [ -z "${BAO_API_ADDR:-}" ]; then
+  echo "ERROR: BAO_API_ADDR is required" >&2
+  exit 1
+fi
+
 append_search_path() {
   uri="$1"
   search_path_opt="-csearch_path%3Dsecret_store"
@@ -25,9 +30,5 @@ append_search_path() {
 }
 
 export BAO_PG_CONNECTION_URL="$(append_search_path "$DB_CONNECTION_URI")"
-
-if [ -z "${BAO_API_ADDR:-}" ] && [ -n "${FLY_APP_NAME:-}" ]; then
-  export BAO_API_ADDR="https://${FLY_APP_NAME}.fly.dev"
-fi
 
 exec bao server -config=/etc/openbao/openbao.hcl

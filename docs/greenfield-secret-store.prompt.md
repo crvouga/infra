@@ -165,7 +165,7 @@ to git.
 
 1. **Audit required secrets.** Before editing, find every secret the app reads:
    `process.env.*`, `os.environ[...]`, `import.meta.env.*`, `env()` in
-   wrangler/fly configs, Docker `ENV`, CI workflow env blocks, etc. List each
+   wrangler/Docker configs, Docker `ENV`, CI workflow env blocks, etc. List each
    env var name and where it is referenced. Distinguish:
    - **Store-backed** — API keys, database URLs, signing secrets, third-party
      tokens

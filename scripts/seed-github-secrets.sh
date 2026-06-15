@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FLY_APP="vault-chrisvouga"
-SKIP_FLY=false
 SKIP_VAULT=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,16 +17,14 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Fetch deploy pipeline secrets from authenticated CLIs and seed GitHub Actions
-(and Fly) secrets. No manual entry required when logged in to each provider.
+secrets. No manual entry required when logged in to each provider.
 
 Options:
-  --skip-fly   Only set GitHub secrets (skip fly secrets set)
   --skip-vault   Do not fetch or set VAULT_TOKEN
-  -h, --help   Show this help
+  -h, --help     Show this help
 
 Log in first:
   gh auth login
-  fly auth login
   neonctl auth       # npm i -g neonctl  (or: npx neonctl auth)
 
 Cloudflare requires a dashboard API token (Wrangler OAuth does not work):
@@ -36,10 +32,10 @@ Cloudflare requires a dashboard API token (Wrangler OAuth does not work):
   export CLOUDFLARE_API_TOKEN='...'  or add to .env / .env.secrets
 
 Optional overrides (env vars, ${ENV_FILE}, or ${ENV_SECRETS_FILE}):
-  NEON_PROJECT_ID, FLY_API_TOKEN, CF_API_TOKEN, CLOUDFLARE_API_TOKEN,
+  NEON_PROJECT_ID, CF_API_TOKEN, CLOUDFLARE_API_TOKEN,
   DB_CONNECTION_URI, VAULT_TOKEN
 
-Required GitHub secrets: FLY_API_TOKEN, CF_API_TOKEN, DB_CONNECTION_URI
+Required GitHub secrets: CF_API_TOKEN, DB_CONNECTION_URI
 Optional GitHub secret:  VAULT_TOKEN (from init-output.json after init.sh)
 EOF
 }
@@ -103,39 +99,6 @@ resolve_neon_project_id() {
 
   echo "ERROR: No Neon projects found. Create a project in Neon or set NEON_PROJECT_ID." >&2
   exit 1
-}
-
-fetch_fly_api_token() {
-  if [ -n "${FLY_API_TOKEN:-}" ]; then
-    record_source "FLY_API_TOKEN (environment override)"
-    return 0
-  fi
-
-  require_cmd flyctl "Install: https://fly.io/docs/hands-on/install-flyctl/"
-  if ! flyctl auth whoami >/dev/null 2>&1; then
-    echo "ERROR: flyctl is not authenticated. Run: fly auth login" >&2
-    exit 1
-  fi
-
-  require_cmd jq "Install jq: https://jqlang.github.io/jq/"
-
-  echo "==> Fetching FLY_API_TOKEN from fly tokens create deploy"
-  local token_json
-  token_json="$(flyctl tokens create deploy -a "$FLY_APP" --json 2>/dev/null || true)"
-  FLY_API_TOKEN="$(echo "$token_json" | jq -r '.token // empty' 2>/dev/null || true)"
-
-  if [ -n "$FLY_API_TOKEN" ]; then
-    record_source "FLY_API_TOKEN (fly tokens create deploy)"
-    return 0
-  fi
-
-  echo "==> Fly app '${FLY_APP}' not found; using fly session token (create the app for a scoped deploy token)"
-  FLY_API_TOKEN="$(flyctl auth token 2>/dev/null || true)"
-  if [ -z "$FLY_API_TOKEN" ]; then
-    echo "ERROR: Could not obtain Fly API token. Run: fly auth login" >&2
-    exit 1
-  fi
-  record_source "FLY_API_TOKEN (fly session token)"
 }
 
 fetch_cf_api_token() {
@@ -262,15 +225,8 @@ assert_non_empty() {
   fi
 }
 
-fly_app_exists() {
-  require_cmd jq "Install jq: https://jqlang.github.io/jq/"
-  flyctl apps list --json 2>/dev/null \
-    | jq -e --arg app "$FLY_APP" '.[] | select(.Name == $app)' >/dev/null 2>&1
-}
-
 while [ $# -gt 0 ]; do
   case "$1" in
-    --skip-fly) SKIP_FLY=true ;;
     --skip-vault) SKIP_VAULT=true ;;
     -h|--help)
       usage
@@ -301,50 +257,26 @@ load_env_file "$ENV_FILE"
 load_env_file "$ENV_SECRETS_FILE"
 
 echo "==> GitHub repository: ${GITHUB_REPO}"
-echo "==> Fly app: ${FLY_APP}"
 echo ""
 
-fetch_fly_api_token
 fetch_cf_api_token
 verify_cf_api_token
 fetch_db_connection_uri
 fetch_vault_token
 
-assert_non_empty FLY_API_TOKEN "$FLY_API_TOKEN"
 assert_non_empty CF_API_TOKEN "$CF_API_TOKEN"
 assert_non_empty DB_CONNECTION_URI "$DB_CONNECTION_URI"
 
 echo ""
 echo "==> Setting GitHub Actions secrets..."
-gh secret set FLY_API_TOKEN --body "$FLY_API_TOKEN" --repo "$GITHUB_REPO"
 gh secret set CF_API_TOKEN --body "$CF_API_TOKEN" --repo "$GITHUB_REPO"
 gh secret set DB_CONNECTION_URI --body "$DB_CONNECTION_URI" --repo "$GITHUB_REPO"
 
-GITHUB_SET=(FLY_API_TOKEN CF_API_TOKEN DB_CONNECTION_URI)
+GITHUB_SET=(CF_API_TOKEN DB_CONNECTION_URI)
 
 if [ -n "${VAULT_TOKEN:-}" ]; then
   gh secret set VAULT_TOKEN --body "$VAULT_TOKEN" --repo "$GITHUB_REPO"
   GITHUB_SET+=(VAULT_TOKEN)
-fi
-
-FLY_SET=()
-FLY_APP_MISSING=false
-if [ "$SKIP_FLY" = false ]; then
-  if ! command -v flyctl >/dev/null 2>&1; then
-    echo "WARNING: flyctl not found — skipping Fly secrets" >&2
-  elif ! fly_app_exists; then
-    FLY_APP_MISSING=true
-    echo "WARNING: Fly app '${FLY_APP}' does not exist — skipping Fly secrets" >&2
-    echo "         Create it with: fly apps create ${FLY_APP}" >&2
-    echo "         Then re-run: ./scripts/seed-github-secrets.sh" >&2
-  else
-    echo "==> Setting Fly secrets..."
-    flyctl secrets set DB_CONNECTION_URI="$DB_CONNECTION_URI" --app "$FLY_APP"
-    FLY_SET+=(DB_CONNECTION_URI)
-    record_source "Fly DB_CONNECTION_URI (same as GitHub)"
-  fi
-else
-  echo "==> Skipping Fly secrets (--skip-fly)"
 fi
 
 echo ""
@@ -361,15 +293,6 @@ echo "GitHub Actions secrets (${GITHUB_REPO}):"
 for name in "${GITHUB_SET[@]}"; do
   echo "  - ${name}"
 done
-echo ""
-if [ "${#FLY_SET[@]}" -gt 0 ]; then
-  echo "Fly secrets (${FLY_APP}):"
-  for name in "${FLY_SET[@]}"; do
-    echo "  - ${name}"
-  done
-else
-  echo "Fly secrets: (none set)"
-fi
 echo ""
 if [ -z "${VAULT_TOKEN:-}" ]; then
   echo "Note: VAULT_TOKEN was not set. Smoke tests will skip until you run init.sh"

@@ -1,22 +1,26 @@
-# Secret Store (OpenBao on Fly.io)
+# Secret Store (OpenBao)
 
-Production-ready [OpenBao](https://openbao.org/) deployment on Fly.io with Neon Postgres storage, Cloudflare DNS, and automated GitHub Actions pipeline.
+Production-ready [OpenBao](https://openbao.org/) deployment on the [chrisvouga.dev](https://github.com/crvouga/chrisvouga.dev) single-node stack — Neon Postgres storage, Traefik routing, and automated GitHub Actions.
 
 **URL:** https://vault.chrisvouga.dev
 
 ## Architecture
 
 ```
-GitHub Actions (push to main, or Actions → Deploy → Run workflow)
-  ├── provision-dns   → Cloudflare CNAME
-  ├── migrate-db      → Neon Postgres (secret_store schema)
-  ├── deploy          → Fly.io (OpenBao container)
-  ├── unseal          → Auto-unseal from crvouga.kv
-  ├── issue-tls       → Fly.io certificate
-  └── smoke-test      → KV round-trip (token from crvouga.kv)
+vault repo (push to main)
+  ├── publish-image.yml  → ghcr.io/crvouga/chrisvouga-vault
+  └── migrate-db.yml     → Neon Postgres (secret_store schema)
 
-OpenBao (Fly.io) ──storage──► Neon Postgres (secret_store schema)
-Cloudflare DNS ──CNAME──► vault-chrisvouga.fly.dev
+infra deploy-pipeline
+  ├── deploy vault container on origin droplet
+  └── vault-unseal job → triggers unseal.yml in this repo
+
+unseal.yml (this repo)
+  ├── unseal OpenBao from crvouga.kv
+  └── smoke-test KV round-trip
+
+OpenBao (Docker) ──storage──► Neon Postgres (secret_store schema)
+Traefik ──► vault.chrisvouga.dev
 crvouga.kv ──unseal keys + root_token──► CI unseal + smoke-test
 ```
 
@@ -35,32 +39,23 @@ OpenBao is configured with `skip_create_table = true` so it never auto-creates t
 ## Prerequisites
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) — `gh auth login`
-- [flyctl](https://fly.io/docs/hands-on/install-flyctl/) — `fly auth login`
 - [Neon CLI (`neonctl`)](https://neon.com/docs/reference/cli-install) — `neonctl auth`
-- **Cloudflare API token** — [create manually](https://dash.cloudflare.com/profile/api-tokens) with **Zone:DNS:Edit** for `chrisvouga.dev` (Wrangler OAuth cannot be used for DNS API)
+- **Cloudflare API token** — [create manually](https://dash.cloudflare.com/profile/api-tokens) with **Zone:DNS:Edit** for `chrisvouga.dev`
 - [Vault CLI (`vault`)](https://openbao.org/docs/install/) — OpenBao-compatible; used for init, smoke tests, and local dev
 - [PostgreSQL client (`psql`)](https://www.postgresql.org/download/) — for migrations
 - [`jq`](https://jqlang.github.io/jq/) — for init and seed scripts
 
 ## First-Time Setup
 
-### 1. Create the Fly app (one-time, local)
+### 1. Seed GitHub secrets
 
-```bash
-fly apps create vault-chrisvouga
-```
-
-### 2. Seed secrets
-
-Log in to each provider, then run the seed script. It auto-fetches secrets from your CLI sessions and pushes them to GitHub Actions (and Fly):
+Log in to each provider, then run the seed script. It auto-fetches secrets from your CLI sessions and pushes them to GitHub Actions:
 
 ```bash
 gh auth login
-fly auth login
 neonctl auth          # npm i -g neonctl  (or: npx neonctl auth)
 
 # Cloudflare: create Zone:DNS:Edit token at https://dash.cloudflare.com/profile/api-tokens
-# Add to .env (see .env.secrets.example) or export:
 export CLOUDFLARE_API_TOKEN='your-token'
 
 chmod +x scripts/seed-github-secrets.sh
@@ -69,39 +64,25 @@ chmod +x scripts/seed-github-secrets.sh
 
 | Secret | Required | Source |
 |--------|----------|--------|
-| `FLY_API_TOKEN` | Yes | `fly tokens create deploy` (or session token) |
-| `CF_API_TOKEN` | Yes | `CLOUDFLARE_API_TOKEN` — dashboard API token (not Wrangler) |
+| `CF_API_TOKEN` | Yes | `CLOUDFLARE_API_TOKEN` — dashboard API token |
 | `DB_CONNECTION_URI` | Yes | `neon connection-string` |
 | `VAULT_TOKEN` | Optional | `init-output.json` — CI reads `root_token` from `crvouga.kv` instead |
 
 Flags:
 
-- `--skip-fly` — only seed GitHub (if the Fly app is not created yet)
 - `--skip-vault` — do not fetch or set `VAULT_TOKEN`
 
-Optional overrides via [`.env`](.env) or [`.env.secrets`](.env.secrets.example) (`.env.secrets` takes precedence). Set `NEON_PROJECT_ID` if you have multiple Neon projects (or run `neon set-context` first).
+Optional overrides via [`.env`](.env) or [`.env.secrets`](.env.secrets.example). Set `NEON_PROJECT_ID` if you have multiple Neon projects.
 
-Re-run after `init.sh` if you want `VAULT_TOKEN` in GitHub for local tooling; CI smoke tests use `root_token` from `crvouga.kv`.
+Runtime secrets (`DB_CONNECTION_URI`, `BAO_API_ADDR`) are synced to the node via infra `services.yaml` and Vault.
 
-The workflow derives everything else automatically:
+### 2. Deploy via GitHub Actions
 
-- **Cloudflare zone** — looked up from `CUSTOM_DOMAIN` (`vault.chrisvouga.dev` → zone `chrisvouga.dev`)
-- **Fly hostname** — derived from `FLY_APP` (`vault-chrisvouga.fly.dev`)
+Push to `main` on this repo (or run **Publish image**). Infra deploy-pipeline pulls the image and starts the container. After deploy, infra triggers **Unseal** in this repo.
 
-### 3. Deploy via GitHub Actions
+Every container restart leaves OpenBao **sealed**; CI unseals automatically.
 
-Push to `main` (or run **Actions → Deploy → Run workflow**). The workflow will:
-
-1. Create the Cloudflare CNAME (`vault.chrisvouga.dev` → `vault-chrisvouga.fly.dev`, not proxied)
-2. Run database migrations against Neon (`secret_store` schema)
-3. Deploy OpenBao to Fly.io
-4. Auto-unseal OpenBao using keys from `crvouga.kv` (`k = 'secret-store/unseal-keys'`)
-5. Issue a TLS certificate for the custom domain
-6. Run smoke tests using `root_token` from the same `crvouga.kv` row
-
-Every deploy restarts OpenBao **sealed**; CI unseals automatically before smoke tests.
-
-### 4. Initialize OpenBao (one-time, local)
+### 3. Initialize OpenBao (one-time, local)
 
 After the first deploy succeeds, run init locally:
 
@@ -123,17 +104,11 @@ This script will:
 
 **Save the unseal keys and root token from the output immediately.**
 
-Store unseal keys and `root_token` in `crvouga.kv` (managed out of band) so CI can auto-unseal and smoke-test. Optionally re-run the seed script for GitHub `VAULT_TOKEN`:
-
-```bash
-./scripts/seed-github-secrets.sh
-```
-
-Push to `main` (or re-run Deploy) to verify the full pipeline including smoke tests.
+Store unseal keys and `root_token` in `crvouga.kv` so CI can auto-unseal and smoke-test.
 
 ## **WARNING: Back Up Unseal Keys and Root Token**
 
-**Losing your unseal keys or root token means losing access to ALL secrets permanently.** There is no recovery without the unseal keys. Store them offline in a password manager or secure physical backup. Never commit them to git.
+**Losing your unseal keys or root token means losing access to ALL secrets permanently.** Store them offline in a password manager or secure physical backup. Never commit them to git.
 
 ## Database migrations
 
@@ -144,13 +119,11 @@ export DB_CONNECTION_URI="postgres://..."
 ./scripts/migrate.sh
 ```
 
-The script is idempotent — already-applied migrations are tracked in `secret_store.schema_migrations` and skipped. The Deploy workflow runs migrations before each deploy.
-
-To add a new migration, create `migrations/003_description.sql` using fully qualified `secret_store.*` table names.
+The **Migrate DB** workflow runs migrations on push when migration files change.
 
 ## Manual Unseal
 
-After a machine restart or redeploy, OpenBao starts **sealed**. CI auto-unseals on every deploy from `crvouga.kv`. To unseal manually (fallback):
+After a restart or redeploy, OpenBao starts **sealed**. CI auto-unseals on every deploy from `crvouga.kv`. To unseal manually:
 
 ```bash
 export VAULT_ADDR="https://vault.chrisvouga.dev"
@@ -162,12 +135,6 @@ vault operator unseal   # enter unseal key 3
 vault status            # should show Sealed: false
 ```
 
-You need 3 of the 5 unseal keys each time. To print ready-to-run commands from the DB:
-
-```bash
-psql "$DB_CONNECTION_URI" -f scripts/queries/unseal-keys.sql
-```
-
 ## Smoke Tests
 
 ### Locally
@@ -177,164 +144,69 @@ chmod +x scripts/smoke-test.sh
 ./scripts/smoke-test.sh
 ```
 
-Auth is resolved automatically from `VAULT_TOKEN`, `vault login`, `~/.vault-token`, or `init-output.json`. Or use:
-
-```bash
-./scripts/vault-run.sh -- ./scripts/smoke-test.sh
-```
-
 ### In CI
 
-Smoke tests run automatically at the end of the Deploy workflow on every push to `main`. The job reads `root_token` from `crvouga.kv` via [`scripts/fetch-vault-token.sh`](scripts/fetch-vault-token.sh). The deploy fails if unseal or smoke-test does not succeed.
+Smoke tests run in **Unseal** workflow after auto-unseal. The job reads `root_token` from `crvouga.kv` via [`scripts/fetch-vault-token.sh`](scripts/fetch-vault-token.sh).
 
 ## Syncing dev keys to prd
 
-Use [`scripts/sync-dev-keys-to-prd.sh`](scripts/sync-dev-keys-to-prd.sh) to ensure each project's `prd` secret has every key from its `dev` secret. Missing keys in prd are copied from dev; existing prd keys are never overwritten. Keys present only in prd are left unchanged. The script never syncs prd → dev.
-
-**Prerequisites:**
-
-- OpenBao initialized and unsealed
-- Vault auth with **write** access to `secret/data/*` (root or admin policy — not the read-only `dev-read` token)
+Use [`scripts/sync-dev-keys-to-prd.sh`](scripts/sync-dev-keys-to-prd.sh) to copy missing keys from `dev` to `prd` per project. Existing prd keys are never overwritten.
 
 ```bash
-chmod +x scripts/vault-run.sh scripts/sync-dev-keys-to-prd.sh
-
-# Preview missing prd keys (names only, no values printed)
 ./scripts/vault-run.sh -- ./scripts/sync-dev-keys-to-prd.sh --dry-run
-
-# Copy missing dev keys into prd for all projects
 ./scripts/vault-run.sh -- ./scripts/sync-dev-keys-to-prd.sh
-
-# Limit to one project
-./scripts/vault-run.sh -- ./scripts/sync-dev-keys-to-prd.sh --project personal
 ```
-
-| Flag | Purpose |
-|------|---------|
-| `--dry-run` | List missing key names per project without writing |
-| `--mount PATH` | KV v2 mount (default: `secret`) |
-| `--project NAME` | Limit to specific projects (repeatable) |
-
-Re-running is safe — only keys absent from prd are added.
 
 ## Using secrets locally
 
-Install the global `vault` wrapper once, then use `vault run` in any project to inject secrets as environment variables.
-
-### 1. Install the CLI wrapper
-
-Requires [Vault or OpenBao CLI](https://openbao.org/docs/install/) and [`jq`](https://jqlang.github.io/jq/) installed separately.
+Install the global `vault` wrapper once, then use `vault run` in any project:
 
 ```bash
 chmod +x scripts/install-cli.sh
 ./scripts/install-cli.sh
-```
-
-This installs a wrapper to `~/.local/bin/vault` that adds `run` and `setup` subcommands. All other commands pass through to the real Vault/OpenBao binary.
-
-If you already had `vault` on PATH, the installer renames it to `vault-real`.
-
-### 2. Authenticate
-
-```bash
-# Root token (full access)
 vault login hvs.your-root-token
 
-# Or create a scoped read-only dev token (recommended for daily use)
-./scripts/create-dev-token.sh
-vault login hvs.dev-token...
-```
-
-### 3. Configure a project
-
-In any app repo:
-
-```bash
 cd ~/my-app
 vault setup --project myapp --config dev
-```
-
-This writes [`.vault.yaml`](.vault.yaml.example):
-
-```yaml
-addr: https://vault.chrisvouga.dev
-mount: secret
-project: myapp
-config: dev
-```
-
-### 4. Run commands with secrets injected
-
-```bash
 vault run -- bun myserver.tsx
-vault run --dry-run -- npm test    # preview env var names only
-vault run --project myapp --config prd -- npm start   # override .vault.yaml
 ```
-
-Secrets are read from `secret/<project>/<config>` (KV v2). Each field becomes an environment variable.
-
-## Fly Secrets
-
-| Secret | Purpose |
-|--------|---------|
-| `DB_CONNECTION_URI` | Neon Postgres connection string for OpenBao storage backend |
-
-```bash
-fly secrets set DB_CONNECTION_URI="postgres://..." --app vault-chrisvouga
-```
-
-Fly also sets `FLY_APP_NAME` automatically, which the entrypoint uses to configure `BAO_API_ADDR`. The entrypoint appends `search_path=secret_store` to the connection URL at runtime.
 
 ## Health Checks
 
-Fly.io health checks hit:
+Container health checks hit:
 
 ```
 GET /v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200
 ```
 
-This returns HTTP 200 even when OpenBao is sealed or uninitialized, so the process is considered healthy while waiting for manual init/unseal.
+Returns HTTP 200 even when sealed or uninitialized, so the process stays healthy while waiting for init/unseal.
 
 ## Repository Structure
 
 ```
 vault/
 ├── .github/workflows/
-│   └── deploy.yml                 # CI/CD: deploy, auto-unseal, smoke-test
+│   ├── publish-image.yml          # Build + push image → infra deploy
+│   ├── deploy.yml                 # Neon DB migrations
+│   └── unseal.yml                 # Auto-unseal + smoke-test
 ├── cli/                           # Global vault wrapper (vault run / vault setup)
-│   ├── bin/vault
-│   └── lib/
-├── config/
-│   ├── openbao.hcl                # OpenBao server config
-│   └── policies/dev-read.hcl      # Scoped read policy for local dev
+├── config/openbao.hcl             # OpenBao server config
 ├── migrations/                    # SQL migrations (secret_store schema)
 ├── scripts/
-│   ├── queries/
-│   │   └── unseal-keys.sql             # Copy-paste unseal commands from crvouga.kv
-│   ├── init.sh                         # First-time initialization
-│   ├── migrate.sh                      # Apply database migrations
-│   ├── install-cli.sh                  # Install global vault wrapper
-│   ├── create-dev-token.sh             # Create scoped local-dev token
-│   ├── unseal.sh                       # Auto-unseal from crvouga.kv (CI)
-│   ├── fetch-vault-token.sh            # Read root_token from crvouga.kv (CI)
-│   ├── vault-run.sh                    # Run a command with Vault API credentials
-│   ├── seed-github-secrets.sh          # Auto-fetch + seed GitHub/Fly secrets
-│   └── smoke-test.sh                   # End-to-end verification
-├── .vault.yaml.example            # Per-project config template
-├── docker-entrypoint.sh           # Maps env vars + search_path for OpenBao
-├── Dockerfile
-├── fly.toml
-└── README.md
+│   ├── init.sh                    # First-time initialization
+│   ├── migrate.sh                 # Apply database migrations
+│   ├── unseal.sh                  # Auto-unseal from crvouga.kv (CI)
+│   ├── seed-github-secrets.sh     # Auto-fetch + seed GitHub secrets
+│   └── smoke-test.sh              # End-to-end verification
+├── docker-entrypoint.sh
+└── Dockerfile
 ```
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| Health check fails | Check Fly logs: `fly logs --app vault-chrisvouga` |
-| Smoke test returns 503 | OpenBao is sealed — run manual unseal |
-| DNS not resolving | Verify Cloudflare CNAME points to `vault-chrisvouga.fly.dev` (proxied: off) |
-| TLS certificate pending | Wait for DNS propagation; check with `fly certs check vault.chrisvouga.dev` |
-| DB connection errors | Verify `DB_CONNECTION_URI` Fly secret matches Neon connection string |
-| Migration job fails | Check `DB_CONNECTION_URI` GitHub secret; ensure Neon allows connections from GitHub Actions IPs |
-| Empty OpenBao after schema change | If data existed in `public.vault_kv_store`, migrate manually: `INSERT INTO secret_store.vault_kv_store SELECT * FROM public.vault_kv_store;` |
+| Smoke test returns 503 | OpenBao is sealed — run manual unseal or re-run **Unseal** workflow |
+| DNS not resolving | Verify `vault.chrisvouga.dev` in infra DNS sync |
+| DB connection errors | Verify `DB_CONNECTION_URI` in Vault / infra env sync |
+| Migration job fails | Check `DB_CONNECTION_URI` GitHub secret; ensure Neon allows GitHub Actions IPs |

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Remove duplicate auth mount rows that block OpenBao post-unseal setup.
 #
-# Symptom in fly logs:
+# Symptom in container logs:
 #   failed to mount auth entry: path=userpass/ error="cannot mount under existing mount \"auth/userpass/\""
 #   post-unseal setup failed: error="failed to setup auth table"
 #
 # Cause: duplicate rows in secret_store.vault_kv_store at path /core/auth/ pointing at
-# the same auth path (often from concurrent Fly machines writing storage).
+# the same auth path (often from concurrent containers writing storage).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
