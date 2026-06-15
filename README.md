@@ -1,6 +1,6 @@
 # turborepo-remote-cache
 
-Self-hosted [Turborepo Remote Cache](https://turbo.build/docs/core-concepts/remote-caching) on Fly.io with Backblaze B2 object storage.
+Self-hosted [Turborepo Remote Cache](https://turbo.build/docs/core-concepts/remote-caching) on the chrisvouga.dev origin stack with Backblaze B2 object storage.
 
 **Domain:** `https://turborepo.chrisvouga.dev`
 
@@ -23,9 +23,8 @@ bun run setup
 
 3. Set remaining **required** secrets in both Vault configs (`dev` and `prd`). See [`scripts/vault-secrets-registry.ts`](scripts/vault-secrets-registry.ts) for the full list and hints:
    - `TURBO_TOKEN` — bearer token for Turbo clients and the cache server
-   - `VAULT_TOKEN` — long-lived Vault read token (CI syncs to Fly for server boot)
+   - `VAULT_TOKEN` — long-lived Vault read token (runtime secret loading)
    - B2 keys: `B2_S3_ENDPOINT`, `B2_S3_REGION`, `B2_S3_ACCESS_KEY_ID`, `B2_S3_SECRET_ACCESS_KEY`, `B2_BUCKET`
-   - Deploy: `FLY_API_TOKEN`, `CLOUDFLARE_API_TOKEN`
 
    Derived defaults (`TURBO_API`, `TURBO_TEAM`, `TURBO_CACHE`) are applied by `setup` when missing.
 
@@ -36,13 +35,13 @@ bun run check:vault-secrets        # dev (CI uses this)
 bun run check:vault-secrets:prd    # prd (deploy uses this)
 ```
 
-5. Deploy (local build + Fly deploy):
+5. Deploy:
 
 ```bash
 bun run deploy
 ```
 
-Production deploys run fully in CI on push to `main` — no manual Fly.io setup required.
+Production deploys run via **Publish image** → infra deploy-pipeline on push to `main`.
 
 ## Turbo client config
 
@@ -64,26 +63,14 @@ bun run check  # format + tc + lint + test + build
 
 ## CI/CD
 
-Single workflow: [`.github/workflows/deployment-pipeline.yml`](.github/workflows/deployment-pipeline.yml)
-
-- **check** — every push/PR: Vault `dev` secrets gate + `bun run check`
-- **deploy** — main push only (runs in parallel with check): Vault `prd` secrets → GHCR → Fly deploy → smoke test
-
-The deploy job is fully automated from Vault:
-
-1. Creates the Fly app if missing
-2. Syncs `VAULT_TOKEN` to Fly secrets
-3. Adds the TLS cert for `turborepo.chrisvouga.dev` if missing
-4. Upserts Cloudflare DNS records from `fly certs setup` (DNS-only, no manual steps)
-5. Deploys the public GHCR image (`fly deploy --image ghcr.io/...`)
-
-CI builds and pushes to GHCR, then verifies the image is anonymously pullable (Fly needs a public package). GitHub may require a one-time manual step: open the package settings and set visibility to **Public**.
+- **deployment-pipeline.yml** — every push/PR: Vault `dev` secrets gate + `bun run check`
+- **publish-image.yml** — push to `main`: build `ghcr.io/crvouga/chrisvouga-turborepo` → dispatch infra deploy
 
 CI authenticates via GitHub OIDC (`hashicorp/vault-action`); no GitHub repo secrets required.
 
 ## Layout
 
-- `apps/api` — Hono cache server (Turborepo `/v8/artifacts/*` API) + Dockerfile + `fly.toml`
+- `apps/api` — Hono cache server (Turborepo `/v8/artifacts/*` API) + Dockerfile
 - `pkgs/object-store` — swappable blob storage (`ObjectStoreImplS3` for B2)
 - `pkgs/secret-store` — Vault secret loading at server boot
 - `scripts/vault-secrets-registry.ts` — source of truth for expected Vault keys
