@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
- * Set all chrisvouga-* container packages on ghcr.io to public visibility.
+ * Set all zone-prefixed container packages on ghcr.io to public visibility.
  * Requires GH_TOKEN or GITHUB_TOKEN with packages:write.
  *
  * Usage:
  *   bun run scripts/make-ghcr-public.ts
  *   bun run scripts/make-ghcr-public.ts --dry-run
  */
-import { loadServicesConfig } from "../lib/services.js";
+import { imagePackageName, loadServicesConfig } from "../lib/services.js";
 
 function token(): string {
   const t =
@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   console.log(`Make ghcr packages public (${dryRun ? "DRY-RUN" : "APPLY"})`);
 
   for (const service of config.services) {
-    const packageName = `chrisvouga-${service.id}`;
+    const packageName = imagePackageName(config, service.id);
     await setPublic(config.image_owner, packageName, dryRun);
   }
 }

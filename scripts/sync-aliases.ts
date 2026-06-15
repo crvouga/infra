@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Ensure configured external zones redirect to chrisvouga.dev hostnames.
+ * Ensure configured external zones redirect to stack hostnames.
  *
  * Usage:
  *   bun run scripts/sync-aliases.ts
@@ -10,10 +10,9 @@ import {
   CloudflareApi,
   type CloudflareRulesetRule,
 } from "../lib/cloudflare-api.js";
-import { loadServicesConfig, type AliasSpec } from "../lib/services.js";
+import { loadServicesConfig, zoneSlug, type AliasSpec } from "../lib/services.js";
 
 const REDIRECT_PHASE = "http_request_dynamic_redirect";
-const MANAGED_COMMENT = "managed by chrisvouga.dev/scripts/sync-aliases.ts";
 const PLACEHOLDER_IPV4 = "192.0.2.1";
 
 function parseArgs(argv: readonly string[]): { apply: boolean } {
@@ -31,16 +30,21 @@ function parseArgs(argv: readonly string[]): { apply: boolean } {
   return { apply };
 }
 
-function ruleRef(alias: AliasSpec, host: string): string {
+function ruleRef(zoneSlugName: string, alias: AliasSpec, host: string): string {
   const slug = host.replace(/\./g, "_");
-  return `chrisvouga_alias_${alias.zone.replace(/\./g, "_")}_${slug}`;
+  return `${zoneSlugName}_alias_${alias.zone.replace(/\./g, "_")}_${slug}`;
 }
 
-function hostRedirectRule(alias: AliasSpec, host: string): CloudflareRulesetRule {
+function hostRedirectRule(
+  alias: AliasSpec,
+  host: string,
+  zoneSlugName: string,
+  managedComment: string,
+): CloudflareRulesetRule {
   return {
-    ref: ruleRef(alias, host),
+    ref: ruleRef(zoneSlugName, alias, host),
     expression: `(http.host eq "${host}")`,
-    description: `${MANAGED_COMMENT} — ${host} → ${alias.target}`,
+    description: `${managedComment} — ${host} → ${alias.target}`,
     enabled: true,
     action: "redirect",
     action_parameters: {
@@ -55,8 +59,12 @@ function hostRedirectRule(alias: AliasSpec, host: string): CloudflareRulesetRule
   };
 }
 
-function isManagedRule(rule: CloudflareRulesetRule, alias: AliasSpec): boolean {
-  return alias.hosts.some((host) => rule.ref === ruleRef(alias, host));
+function isManagedRule(
+  rule: CloudflareRulesetRule,
+  alias: AliasSpec,
+  zoneSlugName: string,
+): boolean {
+  return alias.hosts.some((host) => rule.ref === ruleRef(zoneSlugName, alias, host));
 }
 
 async function ensureHostARecord(
@@ -64,6 +72,7 @@ async function ensureHostARecord(
   zoneId: string,
   host: string,
   apply: boolean,
+  managedComment: string,
 ): Promise<void> {
   const records = await cf.listDnsRecords(zoneId);
   const existing = records.filter((r) => r.name === host && r.type === "A");
@@ -76,7 +85,7 @@ async function ensureHostARecord(
         content: PLACEHOLDER_IPV4,
         proxied: true,
         ttl: 1,
-        comment: MANAGED_COMMENT,
+        comment: managedComment,
       });
     }
     return;
@@ -91,7 +100,7 @@ async function ensureHostARecord(
         content: PLACEHOLDER_IPV4,
         proxied: true,
         ttl: 1,
-        comment: MANAGED_COMMENT,
+        comment: managedComment,
       });
     }
   } else {
@@ -104,12 +113,16 @@ async function ensureRedirectRules(
   zoneId: string,
   alias: AliasSpec,
   apply: boolean,
+  zoneSlugName: string,
+  managedComment: string,
 ): Promise<void> {
-  const desired = alias.hosts.map((host) => hostRedirectRule(alias, host));
+  const desired = alias.hosts.map((host) =>
+    hostRedirectRule(alias, host, zoneSlugName, managedComment),
+  );
   const entrypoint = await cf.getRulesetPhaseEntrypoint(zoneId, REDIRECT_PHASE);
   const rules = entrypoint?.rules ?? [];
-  const others = rules.filter((r) => !isManagedRule(r, alias));
-  const managed = rules.filter((r) => isManagedRule(r, alias));
+  const others = rules.filter((r) => !isManagedRule(r, alias, zoneSlugName));
+  const managed = rules.filter((r) => isManagedRule(r, alias, zoneSlugName));
 
   const desiredByRef = new Map(desired.map((r) => [r.ref!, r]));
   let changes = 0;
@@ -156,7 +169,13 @@ async function ensureRedirectRules(
   }
 }
 
-async function syncAlias(cf: CloudflareApi, alias: AliasSpec, apply: boolean): Promise<void> {
+async function syncAlias(
+  cf: CloudflareApi,
+  alias: AliasSpec,
+  apply: boolean,
+  zoneSlugName: string,
+  managedComment: string,
+): Promise<void> {
   const zone = await cf.findZoneByName(alias.zone);
   if (!zone) {
     console.error(`Zone "${alias.zone}" not found in Cloudflare account`);
@@ -165,14 +184,16 @@ async function syncAlias(cf: CloudflareApi, alias: AliasSpec, apply: boolean): P
 
   console.log(`\nAlias zone ${alias.zone} → ${alias.target} (${apply ? "APPLY" : "DRY-RUN"})`);
   for (const host of alias.hosts) {
-    await ensureHostARecord(cf, zone.id, host, apply);
+    await ensureHostARecord(cf, zone.id, host, apply, managedComment);
   }
-  await ensureRedirectRules(cf, zone.id, alias, apply);
+  await ensureRedirectRules(cf, zone.id, alias, apply, zoneSlugName, managedComment);
 }
 
 async function main(): Promise<void> {
   const { apply } = parseArgs(process.argv.slice(2));
   const config = loadServicesConfig();
+  const slug = zoneSlug(config.zone);
+  const managedComment = `managed by infra/scripts/sync-aliases.ts (${config.zone})`;
   const aliases = config.aliases ?? [];
 
   if (aliases.length === 0) {
@@ -182,7 +203,7 @@ async function main(): Promise<void> {
 
   const cf = new CloudflareApi();
   for (const alias of aliases) {
-    await syncAlias(cf, alias, apply);
+    await syncAlias(cf, alias, apply, slug, managedComment);
   }
 }
 

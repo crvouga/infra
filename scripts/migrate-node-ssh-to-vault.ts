@@ -2,7 +2,7 @@
 /**
  * One-time copy of node SSH credentials into Vault.
  *
- * Reads from CHRISVOUGA_DEV_NODE_SSH_* or legacy MIGRATE_FROM_LEGACY_NODE_SSH_* env vars.
+ * Reads from NODE_SSH_* or legacy MIGRATE_FROM_LEGACY_NODE_SSH_* env vars.
  *
  * Usage:
  *   export VAULT_TOKEN=$(vault print token)
@@ -26,14 +26,14 @@ async function main(): Promise<void> {
   const creds = nodeSshFromEnv() ?? credsFromLegacyEnv();
   if (!creds) {
     console.error(
-      "Set CHRISVOUGA_DEV_NODE_SSH_* or MIGRATE_FROM_LEGACY_NODE_SSH_* (host, user, key) in the environment.",
+      "Set NODE_SSH_* or MIGRATE_FROM_LEGACY_NODE_SSH_* (host, user, key) in the environment.",
     );
     process.exit(2);
   }
 
   await writeNodeSshToVault(creds);
   setNodeSshEnv(creds);
-  console.log("Wrote CHRISVOUGA_DEV_NODE_SSH_* to Vault (secret/data/personal/prd)");
+  console.log("Wrote NODE_SSH_* to Vault (secret/data/personal/prd)");
   console.log(`  host: ${creds.host}`);
   console.log(`  user: ${creds.user}`);
 }

@@ -1,8 +1,11 @@
 name: Vault secrets (OIDC)
 description: Authenticate to OpenBao via GitHub OIDC and export pipeline secrets
 inputs:
+  vault_addr:
+    description: "Vault API URL (from services.yaml zone)"
+    required: true
   allow_missing_node_ssh:
-    description: "Skip loading CHRISVOUGA_DEV_NODE_SSH_* (Setup / Provision node — provision writes them)"
+    description: "Skip loading NODE_SSH_* (Setup / Provision node — provision writes them)"
     required: false
     default: "false"
 runs:
@@ -10,11 +13,11 @@ runs:
   steps:
     - uses: hashicorp/vault-action@v3
       with:
-        url: https://vault.chrisvouga.dev
+        url: ${{ inputs.vault_addr }}
         method: jwt
         path: jwt
         role: github-actions
-        jwtGithubAudience: https://vault.chrisvouga.dev
+        jwtGithubAudience: ${{ inputs.vault_addr }}
         secrets: |
           secret/data/personal/prd CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
           secret/data/personal/prd CLOUDFLARE_ACCOUNT_ID | CLOUDFLARE_ACCOUNT_ID ;
@@ -42,12 +45,12 @@ runs:
     - if: ${{ inputs.allow_missing_node_ssh != 'true' }}
       uses: hashicorp/vault-action@v3
       with:
-        url: https://vault.chrisvouga.dev
+        url: ${{ inputs.vault_addr }}
         method: jwt
         path: jwt
         role: github-actions
-        jwtGithubAudience: https://vault.chrisvouga.dev
+        jwtGithubAudience: ${{ inputs.vault_addr }}
         secrets: |
-          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_HOST | CHRISVOUGA_DEV_NODE_SSH_HOST ;
-          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_USER | CHRISVOUGA_DEV_NODE_SSH_USER ;
-          secret/data/personal/prd CHRISVOUGA_DEV_NODE_SSH_KEY | CHRISVOUGA_DEV_NODE_SSH_KEY
+          secret/data/personal/prd NODE_SSH_HOST | NODE_SSH_HOST ;
+          secret/data/personal/prd NODE_SSH_USER | NODE_SSH_USER ;
+          secret/data/personal/prd NODE_SSH_KEY | NODE_SSH_KEY

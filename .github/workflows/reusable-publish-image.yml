@@ -15,6 +15,8 @@
 #         service_id: pickflix
 #         dockerfile: ./Dockerfile
 #         context: .
+#         image_prefix: chrisvouga-dev
+#         infra_github_repo: crvouga/chrisvouga.dev
 
 name: Reusable publish image
 
@@ -40,9 +42,17 @@ on:
         required: false
         type: string
         default: crvouga
+      image_prefix:
+        description: "GHCR package prefix (zone slug, e.g. chrisvouga-dev)."
+        required: true
+        type: string
+      infra_github_repo:
+        description: "Infra repo owner/name for deploy dispatch."
+        required: true
+        type: string
     secrets:
       DEPLOY_DISPATCH_TOKEN:
-        description: "PAT or GITHUB_TOKEN with repo dispatch to chrisvouga.dev."
+        description: "PAT or GITHUB_TOKEN with repo dispatch to the infra repo."
         required: false
 
 permissions:
@@ -73,15 +83,15 @@ jobs:
           push: true
           provenance: false
           tags: |
-            ghcr.io/${{ inputs.image_owner }}/chrisvouga-${{ inputs.service_id }}:latest
-            ghcr.io/${{ inputs.image_owner }}/chrisvouga-${{ inputs.service_id }}:${{ github.sha }}
+            ghcr.io/${{ inputs.image_owner }}/${{ inputs.image_prefix }}-${{ inputs.service_id }}:latest
+            ghcr.io/${{ inputs.image_owner }}/${{ inputs.image_prefix }}-${{ inputs.service_id }}:${{ github.sha }}
 
       - name: Make package public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PKG: ${{ inputs.image_prefix }}-${{ inputs.service_id }}
         run: |
           set -euo pipefail
-          PKG="chrisvouga-${{ inputs.service_id }}"
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X PATCH \
             -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -98,9 +108,10 @@ jobs:
             echo "Warning: could not set ${PKG} public (HTTP ${STATUS})"
           fi
 
-      - name: Notify chrisvouga.dev deploy
+      - name: Notify infra deploy
         env:
           DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+          INFRA_REPO: ${{ inputs.infra_github_repo }}
         run: |
           set -euo pipefail
           if [ -z "${DISPATCH_TOKEN}" ]; then
@@ -112,7 +123,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/crvouga/chrisvouga.dev/dispatches" \
+            "https://api.github.com/repos/${INFRA_REPO}/dispatches" \
             -d "{\"event_type\":\"deploy-service\",\"client_payload\":{\"id\":\"${{ inputs.service_id }}\",\"image_tag\":\"${{ github.sha }}\"}}")
           if [ "${HTTP}" -ge 200 ] && [ "${HTTP}" -lt 300 ]; then
             echo "Dispatched deploy-service for ${{ inputs.service_id }}@${{ github.sha }}"

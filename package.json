@@ -1,5 +1,5 @@
 {
-  "name": "chrisvouga.dev",
+  "name": "infra",
   "type": "module",
   "private": true,
   "scripts": {
@@ -15,9 +15,11 @@
     "compose-check": "bun run scripts/generate-compose.ts --check",
     "provision-droplet": "bun run scripts/provision-droplet.ts",
     "migrate-node-ssh-to-vault": "bun run scripts/migrate-node-ssh-to-vault.ts",
+    "migrate-vault-node-ssh-keys": "bun run scripts/migrate-vault-node-ssh-keys.ts",
     "seed-vault-github-secret": "bun run scripts/seed-vault-github-secret.ts",
     "rollout-publish": "bun run scripts/rollout-publish-workflows.ts",
-    "generate-infra-auth": "bun run scripts/generate-infra-auth.ts"
+    "generate-infra-auth": "bun run scripts/generate-infra-auth.ts",
+    "print-platform-env": "bun run scripts/print-platform-env.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

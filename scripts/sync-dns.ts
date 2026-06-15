@@ -3,7 +3,7 @@
  * Reconcile Cloudflare DNS for the single-node stack.
  *
  * Ensures:
- *   origin.<zone>  A      → CHRISVOUGA_DEV_NODE_SSH_HOST (droplet IP)
+ *   origin.<zone>  A      → NODE_SSH_HOST (droplet IP)
  *   <hostname>     CNAME  → origin.<zone>  (proxied=true by default)
  *
  * Prunes orphan CNAMEs pointing at legacy hosting suffixes.
@@ -13,6 +13,7 @@
  *   bun run scripts/sync-dns.ts --apply
  *   bun run scripts/sync-dns.ts --id pickflix --apply
  */
+import { NODE_SSH_VAULT_KEYS } from "../lib/node-ssh.js";
 import { CloudflareApi, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
 import {
   allDnsTargets,
@@ -52,10 +53,10 @@ function parseArgs(argv: readonly string[]): Args {
 }
 
 function nodeIp(): string {
-  const ip = process.env["CHRISVOUGA_DEV_NODE_SSH_HOST"]?.trim();
+  const ip = process.env[NODE_SSH_VAULT_KEYS.host]?.trim();
   if (!ip) {
     throw new Error(
-      "CHRISVOUGA_DEV_NODE_SSH_HOST is required (droplet IP for origin A record).",
+      `${NODE_SSH_VAULT_KEYS.host} is required (droplet IP for origin A record).`,
     );
   }
   return ip;
@@ -224,6 +225,7 @@ async function applyAction(
   zoneId: string,
   action: Action,
   args: Args,
+  managedComment: string,
 ): Promise<void> {
   switch (action.kind) {
     case "create":
@@ -233,7 +235,7 @@ async function applyAction(
         content: action.content,
         proxied: args.proxied,
         ttl: 1,
-        comment: "managed by chrisvouga.dev/scripts/sync-dns.ts",
+        comment: managedComment,
       });
       return;
     case "update":
@@ -243,7 +245,7 @@ async function applyAction(
         content: action.content,
         proxied: args.proxied,
         ttl: 1,
-        comment: "managed by chrisvouga.dev/scripts/sync-dns.ts",
+        comment: managedComment,
       });
       return;
     case "delete":
@@ -258,6 +260,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const config = loadServicesConfig();
   const services = servicesFromArgs(config, args);
+  const managedComment = `managed by infra/scripts/sync-dns.ts (${config.zone})`;
   const cf = new CloudflareApi();
   const zone = await cf.findZoneByName(config.zone);
   if (!zone) {
@@ -288,7 +291,7 @@ async function main(): Promise<void> {
       continue;
     }
     try {
-      await applyAction(cf, zone.id, action, args);
+      await applyAction(cf, zone.id, action, args, managedComment);
       console.log(`  [done] ${line}`);
     } catch (err) {
       errors += 1;

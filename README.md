@@ -1,10 +1,12 @@
-# chrisvouga.dev
+# Origin stack (infra)
 
-Single-node Docker deployment for all `*.chrisvouga.dev` side projects.
+Single-node Docker deployment for all services on the zone defined in [`services.yaml`](services.yaml) (`zone: chrisvouga.dev`).
 
-Each project repo builds and pushes its own public image to `ghcr.io/crvouga/chrisvouga-<id>`. This repo **only consumes those images** — GitHub Actions bootstraps the node, syncs DNS/secrets, deploys, and health-checks.
+Each project repo builds and pushes its own public image to `ghcr.io/<image_owner>/<zone-slug>-<id>` (e.g. `ghcr.io/crvouga/chrisvouga-dev-pickflix`). This repo **only consumes those images** — GitHub Actions bootstraps the node, syncs DNS/secrets, deploys, and health-checks.
 
 Cloudflare terminates TLS at the edge (proxied DNS). Traefik on the droplet serves HTTP only.
+
+Platform paths, network names, and GHCR prefixes are derived from `services.yaml` — not hardcoded in scripts.
 
 ## Architecture
 
@@ -12,7 +14,7 @@ Cloudflare terminates TLS at the edge (proxied DNS). Traefik on the droplet serv
 Project repos ──▶ ghcr.io (public images)
                         │
                         ▼
-              chrisvouga.dev CI (GitHub Actions)
+              Infra CI (GitHub Actions)
                         │
           ┌─────────────┼─────────────┐
           ▼             ▼             ▼
@@ -26,22 +28,41 @@ Project repos ──▶ ghcr.io (public images)
               DO Droplet + Traefik :80
                         │
                         ▼
-                 *.chrisvouga.dev
+                 *.<zone from services.yaml>
+```
+
+## Configuration ([`services.yaml`](services.yaml))
+
+| Field | Purpose |
+|-------|---------|
+| `zone` | Primary DNS zone (e.g. `chrisvouga.dev`) |
+| `origin_hostname` | Origin CNAME target |
+| `image_owner` | GHCR org/user |
+| `infra_github_repo` | GitHub repo slug for this infra repo |
+| `droplet_name` | DO droplet name (default `origin`) |
+| `do_project_name` | DigitalOcean project (default `projects`) |
+
+Derived automatically: `image_prefix` (`chrisvouga-dev`), deploy dir (`/opt/chrisvouga-dev`), Docker network (`chrisvouga-dev-web`), Vault URL (`https://vault.<zone>`).
+
+Inspect derived values:
+
+```bash
+bun run scripts/print-platform-env.ts
 ```
 
 ## Automated first deploy (5 steps)
 
 ### 1. Add Vault secrets
 
-In `secret/data/personal/prd` on [vault.chrisvouga.dev](https://vault.chrisvouga.dev):
+In `secret/data/personal/prd` on Vault (`https://vault.<zone>`):
 
 | Key | Purpose |
 |-----|---------|
 | `DIGITALOCEAN_TOKEN` | Create/manage the origin droplet |
 | `GITHUB_TOKEN_SUPER` | PAT with `repo` + `admin:org` — triggers workflows, cross-repo dispatch |
-| `CHRISVOUGA_DEV_NODE_SSH_HOST` | Origin droplet IP (auto-written by provision) |
-| `CHRISVOUGA_DEV_NODE_SSH_USER` | SSH user, typically `root` (auto-written) |
-| `CHRISVOUGA_DEV_NODE_SSH_KEY` | SSH private key (auto-written) |
+| `NODE_SSH_HOST` | Origin droplet IP (auto-written by provision) |
+| `NODE_SSH_USER` | SSH user, typically `root` (auto-written) |
+| `NODE_SSH_KEY` | SSH private key (auto-written) |
 | `CLOUDFLARE_API_TOKEN` | DNS sync (existing) |
 | `NETDATA_USERNAME` | Netdata Traefik basic auth user — see [Infra monitoring](#infra-monitoring) |
 | `NETDATA_PASSWORD` | Netdata password (plain; bcrypt-hashed at deploy) |
@@ -56,10 +77,10 @@ Node SSH credentials live in shared Vault — provisioning writes them automatic
 
 In GitHub Actions → **Setup** → Run workflow:
 
-- `provision_droplet: true` (default) — creates `chrisvouga-origin` droplet (8 GB, Ubuntu 24.04), installs Docker, writes `CHRISVOUGA_DEV_NODE_SSH_*` to Vault
+- `provision_droplet: true` (default) — creates `origin` droplet in DO project `projects` (8 GB, Ubuntu 24.04), installs Docker, writes `NODE_SSH_*` to Vault
 - `deploy: true` (default) — triggers **Deploy Pipeline**
 
-Skips droplet creation if `CHRISVOUGA_DEV_NODE_SSH_HOST` is already in Vault. One-time migration from legacy GitHub `NODE_SSH_*` repo secrets runs automatically when present.
+Skips droplet creation if `NODE_SSH_HOST` is already in Vault. One-time migration from legacy GitHub `NODE_SSH_*` repo secrets runs automatically when present.
 
 ### 3. Roll out publish workflows to sibling repos
 
@@ -70,7 +91,7 @@ export GITHUB_TOKEN_SUPER="ghp_..."
 bun run rollout-publish -- --set-org-dispatch-secret
 ```
 
-This pushes `.github/workflows/publish-image.yml` to all 13 sibling repos (from [`services.yaml`](services.yaml)) and sets org-level `DEPLOY_DISPATCH_TOKEN`.
+This pushes `.github/workflows/publish-image.yml` to all sibling repos (from [`services.yaml`](services.yaml)) and sets org-level `DEPLOY_DISPATCH_TOKEN`.
 
 Options:
 
@@ -87,10 +108,11 @@ Sibling repo pushes trigger `repository_dispatch` → **Deploy Pipeline** per se
 
 | Path | Purpose |
 |------|---------|
-| [`services.yaml`](services.yaml) | Hostnames, ports, images, repo URLs, build paths, secrets |
+| [`services.yaml`](services.yaml) | Zone, hostnames, ports, images, repo URLs, build paths, secrets |
 | [`docker-compose.yml`](docker-compose.yml) | Generated Traefik + app services + infra (Netdata, Dozzle) |
-| [`traefik/traefik.yml`](traefik/traefik.yml) | HTTP-only edge proxy |
-| [`scripts/provision-droplet.ts`](scripts/provision-droplet.ts) | DO droplet + GitHub secret wiring |
+| [`traefik/traefik.yml`](traefik/traefik.yml) | Generated HTTP-only edge proxy config |
+| [`scripts/provision-droplet.ts`](scripts/provision-droplet.ts) | DO droplet + Vault SSH credentials |
+| [`scripts/print-platform-env.ts`](scripts/print-platform-env.ts) | Derived platform env for CI |
 | [`scripts/rollout-publish-workflows.ts`](scripts/rollout-publish-workflows.ts) | Push CI to all project repos |
 | [`.github/workflows/setup.yml`](.github/workflows/setup.yml) | One-click bootstrap |
 | [`.github/workflows/deploy-pipeline.yml`](.github/workflows/deploy-pipeline.yml) | Deploy orchestrator |
@@ -120,6 +142,7 @@ bun run rollout-publish -- --dry-run
 bun run sync-dns -- --apply
 bun run health-check
 bun run make-ghcr-public
+bun run migrate-vault-node-ssh-keys -- --delete-legacy  # one-time Vault key rename
 ```
 
 ## Cloudflare SSL
@@ -132,8 +155,8 @@ Upstream Docker images defined in `services.yaml` → `infra_services` (not buil
 
 | URL | Tool | Auth |
 |-----|------|------|
-| [netdata.chrisvouga.dev](https://netdata.chrisvouga.dev) | Host + container metrics | Traefik basic auth (`NETDATA_USERNAME`, `NETDATA_PASSWORD`) |
-| [dozzle.chrisvouga.dev](https://dozzle.chrisvouga.dev) | Live Docker logs | Dozzle login (`DOZZLE_USERNAME`, `DOZZLE_PASSWORD`) |
+| `netdata.<zone>` | Host + container metrics | Traefik basic auth (`NETDATA_USERNAME`, `NETDATA_PASSWORD`) |
+| `dozzle.<zone>` | Live Docker logs | Dozzle login (`DOZZLE_USERNAME`, `DOZZLE_PASSWORD`) |
 
 Passwords are stored plain in Vault and bcrypt-hashed at deploy by `sync-secrets`. Add these keys before the first full deploy (or run `bun run generate-infra-auth` — no Docker required):
 
@@ -152,3 +175,13 @@ bun run generate-infra-auth -- \
 ```
 
 Both services use `health_check: false` (auth blocks CI probes). After deploy, verify the URLs manually in a browser.
+
+## Migration (from legacy naming)
+
+If upgrading from `CHRISVOUGA_DEV_NODE_SSH_*`, `chrisvouga-origin`, `/opt/chrisvouga`, or `ghcr.io/crvouga/chrisvouga-*`:
+
+1. **Vault:** `vault login && bun run migrate-vault-node-ssh-keys -- --delete-legacy`
+2. **DO:** Rename droplet to `origin` (or reprovision) and move to DO project `projects`
+3. **Node:** Rsync `/opt/chrisvouga` → `/opt/chrisvouga-dev` or reprovision
+4. **GHCR:** `bun run rollout-publish` and push sibling repos to republish `chrisvouga-dev-*` images
+5. **Deploy:** Run full **Deploy Pipeline**

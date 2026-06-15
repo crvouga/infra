@@ -1,5 +1,12 @@
-/** Vault KV field names for the chrisvouga.dev origin node SSH credentials. */
+/** Vault KV field names for the origin node SSH credentials. */
 export const NODE_SSH_VAULT_KEYS = {
+  host: "NODE_SSH_HOST",
+  user: "NODE_SSH_USER",
+  key: "NODE_SSH_KEY",
+} as const;
+
+/** Legacy Vault keys — used only by migrate-vault-node-ssh-keys.ts */
+export const LEGACY_NODE_SSH_VAULT_KEYS = {
   host: "CHRISVOUGA_DEV_NODE_SSH_HOST",
   user: "CHRISVOUGA_DEV_NODE_SSH_USER",
   key: "CHRISVOUGA_DEV_NODE_SSH_KEY",

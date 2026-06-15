@@ -47,7 +47,6 @@ permissions:
   packages: write
 
 env:
-  DEPLOY_DIR: /opt/chrisvouga
   SERVICE_ID: ${{ github.event.client_payload.id || inputs.service_id || '' }}
   IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'latest' }}
 
@@ -84,8 +83,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-      - uses: ./.github/actions/vault-secrets
       - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
+      - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
       - run: bun run make-ghcr-public
         env:
           GH_TOKEN: ${{ env.GITHUB_TOKEN_SUPER }}
@@ -95,14 +97,19 @@ jobs:
     needs: prepare
     steps:
       - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
       - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
 
       - name: Rsync stack files to node
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
-          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
-          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
+          host: ${{ env.NODE_SSH_HOST }}
+          username: ${{ env.NODE_SSH_USER }}
+          key: ${{ env.NODE_SSH_KEY }}
           source: "docker-compose.yml,traefik,services.yaml,scripts/bootstrap-node.sh,scripts/deploy.sh"
           target: ${{ env.DEPLOY_DIR }}
           strip_components: 0
@@ -111,15 +118,15 @@ jobs:
       - name: Bootstrap node
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
-          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
-          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
+          host: ${{ env.NODE_SSH_HOST }}
+          username: ${{ env.NODE_SSH_USER }}
+          key: ${{ env.NODE_SSH_KEY }}
           script_stop: true
           script: |
             set -euo pipefail
             chmod +x ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
             chmod +x ${{ env.DEPLOY_DIR }}/scripts/deploy.sh
-            DEPLOY_DIR=${{ env.DEPLOY_DIR }} ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
+            DEPLOY_DIR=${{ env.DEPLOY_DIR }} SYSTEMD_UNIT=${{ env.SYSTEMD_UNIT }} STACK_DESCRIPTION='${{ env.STACK_DESCRIPTION }}' ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
 
   dns-sync:
     runs-on: ubuntu-latest
@@ -127,8 +134,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-      - uses: ./.github/actions/vault-secrets
       - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
+      - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
       - name: Reconcile DNS
         env:
           SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
@@ -162,8 +172,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-      - uses: ./.github/actions/vault-secrets
       - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
+      - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
       - name: Export bootstrap secrets
         env:
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
@@ -196,18 +209,18 @@ jobs:
       - name: Upload env files to node
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
-          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
-          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
+          host: ${{ env.NODE_SSH_HOST }}
+          username: ${{ env.NODE_SSH_USER }}
+          key: ${{ env.NODE_SSH_KEY }}
           source: "env,node.env,dozzle,traefik/dynamic"
           target: ${{ env.DEPLOY_DIR }}
           overwrite: true
       - name: Place runtime .env on node
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
-          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
-          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
+          host: ${{ env.NODE_SSH_HOST }}
+          username: ${{ env.NODE_SSH_USER }}
+          key: ${{ env.NODE_SSH_KEY }}
           script: |
             set -euo pipefail
             mv ${{ env.DEPLOY_DIR }}/node.env ${{ env.DEPLOY_DIR }}/.env
@@ -225,13 +238,18 @@ jobs:
       }}
     steps:
       - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
       - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
       - name: Deploy stack
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ env.CHRISVOUGA_DEV_NODE_SSH_HOST }}
-          username: ${{ env.CHRISVOUGA_DEV_NODE_SSH_USER }}
-          key: ${{ env.CHRISVOUGA_DEV_NODE_SSH_KEY }}
+          host: ${{ env.NODE_SSH_HOST }}
+          username: ${{ env.NODE_SSH_USER }}
+          key: ${{ env.NODE_SSH_KEY }}
           script_stop: true
           envs: IMAGE_TAG
           script: |
@@ -255,7 +273,12 @@ jobs:
       }}
     steps:
       - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
       - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
       - name: Install gh CLI
         run: |
           type -p curl >/dev/null || sudo apt install curl -y

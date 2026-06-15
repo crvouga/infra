@@ -9,6 +9,7 @@
  *   bun run generate-infra-auth -- --write-vault   # requires: vault login
  */
 import { vaultKvPatchCli } from "../lib/vault-kv.js";
+import { findInfraService, loadServicesConfig } from "../lib/services.js";
 
 type Args = {
   readonly netdataUsername: string;
@@ -78,15 +79,18 @@ function randomPassword(length = 24): string {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const config = loadServicesConfig();
+  const netdataUrl = findInfraService(config, "netdata")?.hostname ?? `netdata.${config.zone}`;
+  const dozzleUrl = findInfraService(config, "dozzle")?.hostname ?? `dozzle.${config.zone}`;
 
   console.log(`
 Infra monitoring credentials (save these — passwords are stored plain in Vault)
 
-  Netdata  https://netdata.chrisvouga.dev
+  Netdata  https://${netdataUrl}
            username: ${args.netdataUsername}
            password: ${args.netdataPassword}
 
-  Dozzle   https://dozzle.chrisvouga.dev
+  Dozzle   https://${dozzleUrl}
            username: ${args.dozzleUsername}
            password: ${args.dozzlePassword}${args.dozzleEmail ? `\n           email:    ${args.dozzleEmail}` : ""}
 `);

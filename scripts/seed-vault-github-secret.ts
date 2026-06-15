@@ -3,7 +3,7 @@
  * Mint a Vault write token and store it as the VAULT_TOKEN GitHub repo secret.
  *
  * OIDC (github-actions role) is read-only (ci-read). Setup / Provision node need
- * patch access to write CHRISVOUGA_DEV_NODE_SSH_* into secret/data/personal/prd.
+ * patch access to write NODE_SSH_* into secret/data/personal/prd.
  *
  * Prerequisites:
  *   - vault CLI authenticated with admin (or policy write + token create)
@@ -19,11 +19,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { $ } from "bun";
 import {
-  DEFAULT_VAULT_ADDR,
   resolveVaultAddr,
 } from "../lib/vault-kv.js";
-
-const DEFAULT_GITHUB_REPO = "crvouga/chrisvouga.dev";
+import { infraGithubRepo, loadServicesConfig, vaultAddr } from "../lib/services.js";
 const POLICY_NAME = "ci-write";
 const GH_SECRET_NAME = "VAULT_TOKEN";
 const KV_PATH = "secret/data/personal/prd";
@@ -43,18 +41,18 @@ type Args = {
 
 function parseArgs(argv: readonly string[]): Args {
   let dryRun = false;
-  let repo = DEFAULT_GITHUB_REPO;
-  let vaultAddr = resolveVaultAddr();
+  let repo = infraGithubRepo(loadServicesConfig());
+  let vaultAddrArg = resolveVaultAddr(vaultAddr(loadServicesConfig()));
   let tokenPeriod = "768h";
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--dry-run") dryRun = true;
     else if (arg === "--repo") repo = argv[++i] ?? repo;
-    else if (arg === "--vault-addr") vaultAddr = resolveVaultAddr(argv[++i]);
+    else if (arg === "--vault-addr") vaultAddrArg = resolveVaultAddr(argv[++i]);
     else if (arg === "--period") tokenPeriod = argv[++i] ?? tokenPeriod;
     else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: bun run scripts/seed-vault-github-secret.ts [--dry-run] [--repo crvouga/chrisvouga.dev] [--period 768h]",
+        "Usage: bun run scripts/seed-vault-github-secret.ts [--dry-run] [--repo owner/name] [--period 768h]",
       );
       process.exit(0);
     } else {
@@ -62,7 +60,7 @@ function parseArgs(argv: readonly string[]): Args {
       process.exit(2);
     }
   }
-  return { dryRun, repo, vaultAddr, tokenPeriod };
+  return { dryRun, repo, vaultAddr: vaultAddrArg, tokenPeriod };
 }
 
 async function requireVaultAuth(vaultAddr: string): Promise<void> {
@@ -70,7 +68,7 @@ async function requireVaultAuth(vaultAddr: string): Promise<void> {
   const lookup = await $`vault token lookup -format=json`.quiet().nothrow();
   if (lookup.exitCode !== 0) {
     throw new Error(
-      `Not authenticated to Vault at ${vaultAddr}. Run:\n  VAULT_ADDR=${DEFAULT_VAULT_ADDR} vault login -method=userpass username=crvouga`,
+      `Not authenticated to Vault at ${vaultAddr}. Run:\n  VAULT_ADDR=${vaultAddr} vault login -method=userpass username=crvouga`,
     );
   }
   const info = JSON.parse(lookup.stdout.toString()) as { data?: { policies?: string[] } };

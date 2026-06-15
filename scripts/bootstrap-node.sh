@@ -2,9 +2,11 @@
 # Idempotent node bootstrap — invoked only from GitHub Actions CI.
 set -euo pipefail
 
-DEPLOY_DIR="${DEPLOY_DIR:-/opt/chrisvouga}"
+DEPLOY_DIR="${DEPLOY_DIR:-/opt/chrisvouga-dev}"
+SYSTEMD_UNIT="${SYSTEMD_UNIT:-chrisvouga-dev.service}"
+STACK_DESCRIPTION="${STACK_DESCRIPTION:-Docker stack}"
 
-echo "==> Bootstrap chrisvouga node (deploy_dir=${DEPLOY_DIR})"
+echo "==> Bootstrap origin node (deploy_dir=${DEPLOY_DIR})"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "==> Installing Docker"
@@ -27,10 +29,10 @@ fi
 mkdir -p "${DEPLOY_DIR}/env"
 chown -R root:root "${DEPLOY_DIR}"
 
-UNIT_PATH="/etc/systemd/system/chrisvouga.service"
+UNIT_PATH="/etc/systemd/system/${SYSTEMD_UNIT}"
 cat > "${UNIT_PATH}" <<EOF
 [Unit]
-Description=chrisvouga.dev Docker stack
+Description=${STACK_DESCRIPTION}
 Requires=docker.service
 After=docker.service network-online.target
 
@@ -48,6 +50,6 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable chrisvouga.service
+systemctl enable "${SYSTEMD_UNIT}"
 
 echo "==> Bootstrap complete"

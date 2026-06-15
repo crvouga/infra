@@ -5,6 +5,9 @@ zone: chrisvouga.dev
 origin_hostname: origin.chrisvouga.dev
 image_owner: crvouga
 default_image_tag: latest
+do_project_name: projects
+droplet_name: origin
+infra_github_repo: crvouga/chrisvouga.dev
 skip_rollout_repos:
   - crvouga/portfolio
 

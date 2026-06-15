@@ -37,7 +37,7 @@ export type ServiceSpec = {
   readonly depends_on?: readonly string[];
 };
 
-/** Upstream Docker image — no GHCR build; defined in chrisvouga.dev only. */
+/** Upstream Docker image — no GHCR build; defined on the origin node only. */
 export type InfraServiceSpec = {
   readonly id: string;
   readonly hostname: string;
@@ -60,18 +60,68 @@ export type ServicesConfig = {
   readonly origin_hostname: string;
   readonly image_owner: string;
   readonly default_image_tag: string;
+  readonly do_project_name?: string;
+  readonly droplet_name?: string;
+  readonly infra_github_repo?: string;
+  readonly image_prefix?: string;
   readonly skip_rollout_repos?: readonly string[];
   readonly aliases?: readonly AliasSpec[];
   readonly services: readonly ServiceSpec[];
   readonly infra_services?: readonly InfraServiceSpec[];
 };
 
+export function zoneSlug(zone: string): string {
+  return zone.replace(/\./g, "-");
+}
+
+export function imagePrefix(config: ServicesConfig): string {
+  return config.image_prefix?.trim() || zoneSlug(config.zone);
+}
+
+export function deployDir(config: ServicesConfig): string {
+  return `/opt/${zoneSlug(config.zone)}`;
+}
+
+export function dockerNetworkName(config: ServicesConfig): string {
+  return `${zoneSlug(config.zone)}-web`;
+}
+
+export function composeProjectName(config: ServicesConfig): string {
+  return zoneSlug(config.zone);
+}
+
+export function vaultAddr(config: ServicesConfig): string {
+  return `https://vault.${config.zone}`;
+}
+
+export function systemdUnitName(config: ServicesConfig): string {
+  return `${zoneSlug(config.zone)}.service`;
+}
+
+export function doProjectName(config: ServicesConfig): string {
+  return config.do_project_name?.trim() || "projects";
+}
+
+export function dropletName(config: ServicesConfig): string {
+  return config.droplet_name?.trim() || "origin";
+}
+
+export function infraGithubRepo(config: ServicesConfig): string {
+  const repo = config.infra_github_repo?.trim();
+  if (!repo) throw new Error("services.yaml: infra_github_repo is required");
+  return repo;
+}
+
+export function imagePackageName(config: ServicesConfig, id: string): string {
+  return `${imagePrefix(config)}-${id}`;
+}
+
 export function isPublicService(service: ServiceSpec): boolean {
   return service.internal !== true;
 }
 
 export function imageRepo(config: ServicesConfig, id: string): string {
-  return `ghcr.io/${config.image_owner}/chrisvouga-${id}`;
+  return `ghcr.io/${config.image_owner}/${imagePackageName(config, id)}`;
 }
 
 export function composeServiceName(id: string): string {
@@ -80,6 +130,9 @@ export function composeServiceName(id: string): string {
 
 export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
   const raw = parseYaml(readFileSync(path, "utf8")) as ServicesConfig;
+  if (!raw?.zone?.trim()) {
+    throw new Error(`Invalid services config at ${path}: zone is required`);
+  }
   if (!raw?.services?.length) {
     throw new Error(`Invalid services config at ${path}`);
   }

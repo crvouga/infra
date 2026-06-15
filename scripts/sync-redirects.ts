@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Ensure apex chrisvouga.dev redirects to www.chrisvouga.dev via Cloudflare.
+ * Ensure apex zone redirects to www via Cloudflare.
  *
  * Usage:
  *   bun run scripts/sync-redirects.ts
@@ -10,11 +10,9 @@ import {
   CloudflareApi,
   type CloudflareRulesetRule,
 } from "../lib/cloudflare-api.js";
-import { loadServicesConfig } from "../lib/services.js";
+import { loadServicesConfig, zoneSlug } from "../lib/services.js";
 
 const REDIRECT_PHASE = "http_request_dynamic_redirect";
-const RULE_REF = "chrisvouga_apex_to_www";
-const MANAGED_COMMENT = "managed by chrisvouga.dev/scripts/sync-redirects.ts";
 const APEX_PLACEHOLDER_IPV4 = "192.0.2.1";
 
 function parseArgs(argv: readonly string[]): { apply: boolean } {
@@ -32,11 +30,16 @@ function parseArgs(argv: readonly string[]): { apply: boolean } {
   return { apply };
 }
 
-function apexRedirectRule(fromHost: string, toHost: string): CloudflareRulesetRule {
+function apexRedirectRule(
+  fromHost: string,
+  toHost: string,
+  ruleRef: string,
+  managedComment: string,
+): CloudflareRulesetRule {
   return {
-    ref: RULE_REF,
+    ref: ruleRef,
     expression: `(http.host eq "${fromHost}")`,
-    description: `${MANAGED_COMMENT} — ${fromHost} → ${toHost}`,
+    description: `${managedComment} — ${fromHost} → ${toHost}`,
     enabled: true,
     action: "redirect",
     action_parameters: {
@@ -56,6 +59,7 @@ async function ensureApexARecord(
   zoneId: string,
   apex: string,
   apply: boolean,
+  managedComment: string,
 ): Promise<void> {
   const records = await cf.listDnsRecords(zoneId);
   const existing = records.filter((r) => r.name === apex && r.type === "A");
@@ -68,7 +72,7 @@ async function ensureApexARecord(
         content: APEX_PLACEHOLDER_IPV4,
         proxied: true,
         ttl: 1,
-        comment: MANAGED_COMMENT,
+        comment: managedComment,
       });
     }
     return;
@@ -83,7 +87,7 @@ async function ensureApexARecord(
         content: APEX_PLACEHOLDER_IPV4,
         proxied: true,
         ttl: 1,
-        comment: MANAGED_COMMENT,
+        comment: managedComment,
       });
     }
   } else {
@@ -97,12 +101,14 @@ async function ensureRedirectRule(
   apex: string,
   www: string,
   apply: boolean,
+  ruleRef: string,
+  managedComment: string,
 ): Promise<void> {
-  const desired = apexRedirectRule(apex, www);
+  const desired = apexRedirectRule(apex, www, ruleRef, managedComment);
   const entrypoint = await cf.getRulesetPhaseEntrypoint(zoneId, REDIRECT_PHASE);
   const rules = entrypoint?.rules ?? [];
-  const managed = rules.filter((r) => r.ref === RULE_REF);
-  const others = rules.filter((r) => r.ref !== RULE_REF);
+  const managed = rules.filter((r) => r.ref === ruleRef);
+  const others = rules.filter((r) => r.ref !== ruleRef);
 
   if (managed.length === 0) {
     console.log(`[plan] CREATE redirect rule ${apex} → ${www}`);
@@ -140,6 +146,9 @@ async function ensureRedirectRule(
 async function main(): Promise<void> {
   const { apply } = parseArgs(process.argv.slice(2));
   const config = loadServicesConfig();
+  const slug = zoneSlug(config.zone);
+  const ruleRef = `${slug}_apex_to_www`;
+  const managedComment = `managed by infra/scripts/sync-redirects.ts (${config.zone})`;
   const apex = config.zone;
   const www = config.services.find((s) => s.id === "portfolio")?.hostname ?? `www.${config.zone}`;
 
@@ -151,8 +160,8 @@ async function main(): Promise<void> {
   }
 
   console.log(`Sync apex redirect (${apply ? "APPLY" : "DRY-RUN"}): ${apex} → ${www}`);
-  await ensureApexARecord(cf, zone.id, apex, apply);
-  await ensureRedirectRule(cf, zone.id, apex, www, apply);
+  await ensureApexARecord(cf, zone.id, apex, apply, managedComment);
+  await ensureRedirectRule(cf, zone.id, apex, www, apply, ruleRef, managedComment);
 }
 
 main().catch((err) => {

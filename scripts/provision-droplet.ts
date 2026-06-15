@@ -11,7 +11,7 @@
  *   DIGITALOCEAN_TOKEN
  *   GITHUB_TOKEN_SUPER  (gh CLI auth for workflow dispatch)
  *   VAULT_TOKEN         (exported by vault-secrets action in CI)
- *   CHRISVOUGA_DEV_NODE_SSH_*  (loaded from Vault when already provisioned)
+ *   NODE_SSH_*          (loaded from Vault when already provisioned)
  *   MIGRATE_FROM_LEGACY_NODE_SSH_*  (one-time copy from GitHub repo secrets)
  */
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -25,10 +25,15 @@ import {
   type NodeSshCredentials,
 } from "../lib/node-ssh.js";
 import { writeNodeSshToVault } from "../lib/vault-kv.js";
+import {
+  doProjectName,
+  dropletName,
+  infraGithubRepo,
+  loadServicesConfig,
+  zoneSlug,
+} from "../lib/services.js";
 
 const DO_API = "https://api.digitalocean.com/v2";
-const DROPLET_NAME = "chrisvouga-origin";
-const GITHUB_REPO = "crvouga/chrisvouga.dev";
 
 type Args = {
   dryRun: boolean;
@@ -98,6 +103,11 @@ type Droplet = {
   networks: { v4: Array<{ ip_address: string; type: string }> };
 };
 
+type DoProject = {
+  id: string;
+  name: string;
+};
+
 async function findDropletByName(token: string, name: string): Promise<Droplet | null> {
   const data = await doFetch<{ droplets: Droplet[] }>(
     token,
@@ -109,6 +119,31 @@ async function findDropletByName(token: string, name: string): Promise<Droplet |
 
 async function deleteDroplet(token: string, id: number): Promise<void> {
   await doFetch(token, "DELETE", `/droplets/${id}`);
+}
+
+async function findDoProject(token: string, name: string): Promise<DoProject | null> {
+  let page = 1;
+  while (true) {
+    const data = await doFetch<{ projects: DoProject[]; links?: { pages?: { next?: string } } }>(
+      token,
+      "GET",
+      `/projects?page=${page}&per_page=200`,
+    );
+    const match = data.projects.find((p) => p.name === name);
+    if (match) return match;
+    if (!data.links?.pages?.next) return null;
+    page += 1;
+  }
+}
+
+async function assignDropletToProject(
+  token: string,
+  projectId: string,
+  dropletId: number,
+): Promise<void> {
+  await doFetch(token, "POST", `/projects/${projectId}/resources`, {
+    resources: [`do:droplet:${dropletId}`],
+  });
 }
 
 type DoSshKey = {
@@ -171,9 +206,9 @@ async function waitForDropletActive(token: string, id: number): Promise<Droplet>
   throw new Error(`Droplet ${id} did not become active in time`);
 }
 
-async function triggerDeploy(ghToken: string): Promise<void> {
+async function triggerDeploy(ghToken: string, repo: string): Promise<void> {
   process.env["GH_TOKEN"] = ghToken;
-  await $`gh workflow run deploy-pipeline.yml --repo ${GITHUB_REPO}`.quiet();
+  await $`gh workflow run deploy-pipeline.yml --repo ${repo}`.quiet();
 }
 
 async function migrateLegacySshToVault(): Promise<boolean> {
@@ -187,33 +222,39 @@ async function migrateLegacySshToVault(): Promise<boolean> {
   const creds: NodeSshCredentials = { host, user, privateKey };
   await writeNodeSshToVault(creds);
   setNodeSshEnv(creds);
-  console.log("Migrated legacy GitHub NODE_SSH_* repo secrets to Vault (CHRISVOUGA_DEV_NODE_SSH_*)");
+  console.log("Migrated legacy GitHub NODE_SSH_* repo secrets to Vault (NODE_SSH_*)");
   return true;
 }
 
 async function persistNodeSshToVault(creds: NodeSshCredentials): Promise<void> {
   await writeNodeSshToVault(creds);
   setNodeSshEnv(creds);
-  console.log("Wrote CHRISVOUGA_DEV_NODE_SSH_* to Vault (secret/data/personal/prd)");
+  console.log("Wrote NODE_SSH_* to Vault (secret/data/personal/prd)");
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const config = loadServicesConfig();
+  const name = dropletName(config);
+  const projectName = doProjectName(config);
+  const githubRepo = infraGithubRepo(config);
+  const slug = zoneSlug(config.zone);
+
   const doToken = requireEnv("DIGITALOCEAN_TOKEN");
   const ghToken = requireEnv("GITHUB_TOKEN_SUPER");
 
   await migrateLegacySshToVault();
 
   if (args.skipIfSecretsExist && nodeSshHostFromEnv()) {
-    console.log("CHRISVOUGA_DEV_NODE_SSH_HOST already in Vault — skipping provision");
+    console.log("NODE_SSH_HOST already in Vault — skipping provision");
     return;
   }
 
   const sshConfiguredInVault = nodeSshHostFromEnv() !== null;
-  const existing = await findDropletByName(doToken, DROPLET_NAME);
+  const existing = await findDropletByName(doToken, name);
   if (existing) {
     const ip = existing.networks.v4.find((n) => n.type === "public")?.ip_address;
-    console.log(`Droplet "${DROPLET_NAME}" already exists (id=${existing.id}, ip=${ip})`);
+    console.log(`Droplet "${name}" already exists (id=${existing.id}, ip=${ip})`);
     if (!ip) throw new Error("Existing droplet has no public IP");
 
     if (sshConfiguredInVault) {
@@ -233,24 +274,23 @@ async function main(): Promise<void> {
       return;
     }
 
-    console.log(
-      "Orphaned droplet found (no CHRISVOUGA_DEV_NODE_SSH_* in Vault) — deleting and recreating",
-    );
+    console.log("Orphaned droplet found (no NODE_SSH_* in Vault) — deleting and recreating");
     await deleteDroplet(doToken, existing.id);
     for (let i = 0; i < 30; i++) {
-      const stillThere = await findDropletByName(doToken, DROPLET_NAME);
+      const stillThere = await findDropletByName(doToken, name);
       if (!stillThere) break;
       await Bun.sleep(5_000);
     }
   }
 
-  const workDir = join(tmpdir(), `chrisvouga-provision-${Date.now()}`);
+  const workDir = join(tmpdir(), `${slug}-provision-${Date.now()}`);
   mkdirSync(workDir, { recursive: true });
   const keyPath = join(workDir, "id_ed25519");
   const pubPath = `${keyPath}.pub`;
 
   if (args.dryRun) {
-    console.log(`[dry-run] Would create droplet ${DROPLET_NAME} in ${args.region} (${args.size})`);
+    console.log(`[dry-run] Would create droplet ${name} in ${args.region} (${args.size})`);
+    console.log(`[dry-run] Would assign to DO project "${projectName}"`);
     rmSync(workDir, { recursive: true, force: true });
     return;
   }
@@ -261,7 +301,7 @@ async function main(): Promise<void> {
 
   const sshFingerprint = await ensureDoSshKey(
     doToken,
-    `chrisvouga-origin-${new Date().toISOString().slice(0, 10)}`,
+    `${name}-${new Date().toISOString().slice(0, 10)}`,
     pubKey,
   );
 
@@ -271,18 +311,18 @@ nohup bash -c 'curl -fsSL https://get.docker.com | sh && systemctl enable docker
 `;
 
   const createBody = {
-    name: DROPLET_NAME,
+    name,
     region: args.region,
     size: args.size,
     image: "ubuntu-24-04-x64",
     ipv6: false,
     monitoring: true,
-    tags: ["chrisvouga", "origin"],
+    tags: ["origin"],
     ssh_keys: [sshFingerprint],
     user_data: userData,
   };
 
-  console.log(`Creating droplet ${DROPLET_NAME} in ${args.region}...`);
+  console.log(`Creating droplet ${name} in ${args.region}...`);
   const created = await doFetch<{ droplet: Droplet }>(
     doToken,
     "POST",
@@ -293,6 +333,14 @@ nohup bash -c 'curl -fsSL https://get.docker.com | sh && systemctl enable docker
   const droplet = await waitForDropletActive(doToken, created.droplet.id);
   const ip = droplet.networks.v4.find((n) => n.type === "public")?.ip_address;
   if (!ip) throw new Error("No public IP on new droplet");
+
+  const project = await findDoProject(doToken, projectName);
+  if (project) {
+    await assignDropletToProject(doToken, project.id, droplet.id);
+    console.log(`Assigned droplet to DO project "${projectName}"`);
+  } else {
+    console.warn(`DO project "${projectName}" not found — droplet created without project assignment`);
+  }
 
   console.log(`Droplet active: ${ip}`);
   console.log("Waiting for SSH (DO-injected key, up to 10 min)...");
@@ -305,7 +353,7 @@ nohup bash -c 'curl -fsSL https://get.docker.com | sh && systemctl enable docker
 
   if (args.triggerDeploy) {
     console.log("Triggering deploy-pipeline...");
-    await triggerDeploy(ghToken);
+    await triggerDeploy(ghToken, githubRepo);
   }
 
   console.log("Provision complete");
