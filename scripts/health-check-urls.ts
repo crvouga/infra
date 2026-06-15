@@ -1,35 +1,43 @@
 #!/usr/bin/env bun
 /**
- * HTTP health-check every service with health_check: true in services.yaml.
+ * HTTP health-check services with health_check: true in services.yaml.
  *
  * Usage:
  *   bun run scripts/health-check-urls.ts
  *   bun run scripts/health-check-urls.ts --id snake-game
  *   bun run scripts/health-check-urls.ts --retries 5 --timeout-ms 30000
  */
-import { findService, isPublicService, loadServicesConfig } from "../lib/services.js";
+import {
+  isAlwaysOn,
+  isPublicService,
+  loadServicesConfig,
+} from "../lib/services.js";
 
 type Args = {
   readonly ids: readonly string[];
   readonly timeoutMs: number;
   readonly retries: number;
   readonly retryDelayMs: number;
+  readonly coldStartTimeoutMs: number;
 };
 
 function parseArgs(argv: readonly string[]): Args {
   const ids: string[] = [];
   let timeoutMs = 30_000;
+  let coldStartTimeoutMs = 90_000;
   let retries = 4;
   let retryDelayMs = 5_000;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--id") ids.push(argv[++i] ?? "");
     else if (arg === "--timeout-ms") timeoutMs = Number(argv[++i] ?? timeoutMs);
+    else if (arg === "--cold-start-timeout-ms")
+      coldStartTimeoutMs = Number(argv[++i] ?? coldStartTimeoutMs);
     else if (arg === "--retries") retries = Number(argv[++i] ?? retries);
     else if (arg === "--retry-delay-ms") retryDelayMs = Number(argv[++i] ?? retryDelayMs);
     else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: bun run scripts/health-check-urls.ts [--id <id> ...] [--timeout-ms <ms>] [--retries <n>]",
+        "Usage: bun run scripts/health-check-urls.ts [--id <id> ...] [--timeout-ms <ms>] [--cold-start-timeout-ms <ms>] [--retries <n>]",
       );
       process.exit(0);
     } else {
@@ -37,7 +45,7 @@ function parseArgs(argv: readonly string[]): Args {
       process.exit(2);
     }
   }
-  return { ids: ids.filter(Boolean), timeoutMs, retries, retryDelayMs };
+  return { ids: ids.filter(Boolean), timeoutMs, coldStartTimeoutMs, retries, retryDelayMs };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -60,10 +68,11 @@ async function checkOnce(url: string, timeoutMs: number): Promise<{ ok: boolean;
 async function checkWithRetries(
   url: string,
   args: Args,
+  perAttemptTimeoutMs: number,
 ): Promise<{ ok: boolean; status: number; attempts: number; error?: string }> {
   const max = args.retries + 1;
   for (let attempt = 1; attempt <= max; attempt++) {
-    const result = await checkOnce(url, args.timeoutMs);
+    const result = await checkOnce(url, perAttemptTimeoutMs);
     if (result.ok) {
       console.log(`  ✓ ${url} (${result.status}) attempt ${attempt}/${max}`);
       return { ok: true, status: result.status, attempts: attempt };
@@ -81,7 +90,7 @@ async function main(): Promise<void> {
   const config = loadServicesConfig();
   const services = config.services.filter((s) => {
     if (!s.health_check || !isPublicService(s) || !s.hostname) return false;
-    if (args.ids.length === 0) return true;
+    if (args.ids.length === 0) return isAlwaysOn(s);
     return args.ids.includes(s.id);
   });
 
@@ -96,8 +105,9 @@ async function main(): Promise<void> {
   for (const service of services) {
     const path = service.health_path ?? "/";
     const url = `https://${service.hostname}${path}`;
+    const perAttemptTimeout = isAlwaysOn(service) ? args.timeoutMs : args.coldStartTimeoutMs;
     console.log(`Checking ${service.id} → ${url}`);
-    const result = await checkWithRetries(url, args);
+    const result = await checkWithRetries(url, args, perAttemptTimeout);
     if (!result.ok) failed.push(`${service.id}: ${result.error}`);
   }
 

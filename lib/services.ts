@@ -16,12 +16,25 @@ export type AliasSpec = {
   readonly target: string;
 };
 
+export type ServiceRuntime = "always_on" | "on_demand";
+
+export type InfraBuildSpec = {
+  readonly dockerfile: string;
+  readonly context: string;
+};
+
+export type OrchestratorConfig = {
+  readonly idle_timeout_minutes?: number;
+};
+
 export type ServiceSpec = {
   readonly id: string;
   /** Public hostname; required unless `internal: true`. */
   readonly hostname?: string;
   /** No Traefik routing, DNS, or public URL — queue consumers, etc. */
   readonly internal?: boolean;
+  /** Default `on_demand` — orchestrator wakes on first request. */
+  readonly runtime?: ServiceRuntime;
   readonly github_repo: string;
   readonly source_code_url: string;
   readonly dockerfile: string;
@@ -41,9 +54,12 @@ export type ServiceSpec = {
 export type InfraServiceSpec = {
   readonly id: string;
   readonly hostname: string;
-  readonly image: string;
+  readonly image?: string;
+  readonly build?: InfraBuildSpec;
   readonly port: number;
   readonly health_check: boolean;
+  /** Default `on_demand`. */
+  readonly runtime?: ServiceRuntime;
   readonly health_path?: string;
   readonly env?: Readonly<Record<string, string>>;
   readonly volumes?: readonly string[];
@@ -65,6 +81,7 @@ export type ServicesConfig = {
   readonly infra_github_repo?: string;
   readonly image_prefix?: string;
   readonly skip_rollout_repos?: readonly string[];
+  readonly orchestrator?: OrchestratorConfig;
   readonly aliases?: readonly AliasSpec[];
   readonly services: readonly ServiceSpec[];
   readonly infra_services?: readonly InfraServiceSpec[];
@@ -128,6 +145,95 @@ export function composeServiceName(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
+export function serviceRuntime(
+  service: ServiceSpec | InfraServiceSpec,
+): ServiceRuntime {
+  return service.runtime ?? "on_demand";
+}
+
+export function isAlwaysOn(service: ServiceSpec | InfraServiceSpec): boolean {
+  return serviceRuntime(service) === "always_on";
+}
+
+export function isOnDemand(service: ServiceSpec | InfraServiceSpec): boolean {
+  return serviceRuntime(service) === "on_demand";
+}
+
+export function idleTimeoutMinutes(config: ServicesConfig): number {
+  return config.orchestrator?.idle_timeout_minutes ?? 30;
+}
+
+/** Compose service ids that start on boot (traefik is implicit). */
+export function alwaysOnComposeNames(config: ServicesConfig): readonly string[] {
+  const names = new Set<string>(["traefik"]);
+  for (const service of config.services) {
+    if (isAlwaysOn(service)) names.add(composeServiceName(service.id));
+  }
+  for (const service of config.infra_services ?? []) {
+    if (isAlwaysOn(service)) names.add(composeServiceName(service.id));
+  }
+  return [...names].sort();
+}
+
+/** Public app + infra services routed through the orchestrator when on_demand. */
+export function onDemandPublicTargets(
+  config: ServicesConfig,
+): readonly { readonly id: string; readonly hostname: string; readonly port: number; readonly traefik_middlewares?: readonly string[] }[] {
+  const targets: Array<{
+    id: string;
+    hostname: string;
+    port: number;
+    traefik_middlewares?: readonly string[];
+  }> = [];
+  for (const service of config.services) {
+    if (!isOnDemand(service) || !isPublicService(service) || !service.hostname || service.port == null) {
+      continue;
+    }
+    targets.push({ id: service.id, hostname: service.hostname, port: service.port });
+  }
+  for (const service of config.infra_services ?? []) {
+    if (!isOnDemand(service)) continue;
+    targets.push({
+      id: service.id,
+      hostname: service.hostname,
+      port: service.port,
+      traefik_middlewares: service.traefik_middlewares,
+    });
+  }
+  return targets;
+}
+
+/** Services that depend on `id` (reverse depends_on edges). */
+export function dependentsOf(config: ServicesConfig, id: string): readonly string[] {
+  return config.services
+    .filter((s) => s.depends_on?.includes(id))
+    .map((s) => s.id);
+}
+
+/** Topological stop order: dependents before dependencies. */
+export function stopOrder(config: ServicesConfig, ids: readonly string[]): readonly string[] {
+  const idSet = new Set(ids);
+  const ordered: string[] = [];
+  const visited = new Set<string>();
+
+  function visit(id: string): void {
+    if (visited.has(id) || !idSet.has(id)) return;
+    visited.add(id);
+    for (const dep of dependentsOf(config, id)) {
+      visit(dep);
+    }
+    ordered.push(id);
+  }
+
+  for (const id of ids) visit(id);
+  return ordered;
+}
+
+/** Start order: dependencies before dependents. */
+export function startOrder(config: ServicesConfig, ids: readonly string[]): readonly string[] {
+  return [...stopOrder(config, ids)].reverse();
+}
+
 export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
   const raw = parseYaml(readFileSync(path, "utf8")) as ServicesConfig;
   if (!raw?.zone?.trim()) {
@@ -157,8 +263,14 @@ export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
     }
   }
   for (const service of raw.infra_services ?? []) {
-    if (!service.hostname || service.port == null || !service.image) {
-      throw new Error(`Infra service "${service.id}" missing hostname, port, or image`);
+    if (!service.hostname || service.port == null) {
+      throw new Error(`Infra service "${service.id}" missing hostname or port`);
+    }
+    if (!service.image && !service.build) {
+      throw new Error(`Infra service "${service.id}" requires image or build`);
+    }
+    if (service.image && service.build) {
+      throw new Error(`Infra service "${service.id}" cannot have both image and build`);
     }
   }
   return raw;

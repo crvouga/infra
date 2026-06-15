@@ -34,8 +34,40 @@ is_infra_service() {
   ' services.yaml
 }
 
+pull_service() {
+  local svc="$1"
+  if [[ "${svc}" == "service-orchestrator" ]]; then
+    echo "---- skip pull ${svc} (built on node)"
+    return 0
+  fi
+  docker compose pull "${svc}"
+}
+
 compose_services() {
   docker compose config --services
+}
+
+always_on_services() {
+  awk '
+    function flush_runtime() {
+      if (id != "" && runtime == "always_on") print id
+      id = ""
+      runtime = "on_demand"
+    }
+    /^services:/ { section = "app"; next }
+    /^infra_services:/ { section = "infra"; next }
+    /^[a-zA-Z_]/ && !/^  / { section = ""; flush_runtime(); next }
+    section != "" && /^  - id: / {
+      flush_runtime()
+      line = $0
+      sub(/^  - id: /, "", line)
+      gsub(/ *$/, "", line)
+      id = line
+      next
+    }
+    section != "" && id != "" && /^    runtime: always_on/ { runtime = "always_on"; next }
+    END { flush_runtime() }
+  ' services.yaml
 }
 
 deploy_all_services() {
@@ -46,22 +78,28 @@ deploy_all_services() {
   while IFS= read -r svc; do
     [[ -z "${svc}" ]] && continue
     echo "---- pull ${svc}"
-    if ! docker compose pull "${svc}"; then
+    if ! pull_service "${svc}"; then
       pull_failed+=("${svc}")
       echo "WARN: pull failed for ${svc}" >&2
     fi
   done < <(compose_services)
 
-  echo "==> Up all services"
+  echo "==> Build service-orchestrator"
+  docker compose build service-orchestrator
+
+  echo "==> Up always-on services"
+  local up_services=(traefik)
   while IFS= read -r svc; do
     [[ -z "${svc}" ]] && continue
+    [[ "${svc}" == "traefik" ]] && continue
     if [[ " ${pull_failed[*]:-} " == *" ${svc} "* ]]; then
       echo "---- skip ${svc} (pull failed)"
       continue
     fi
-    echo "---- up ${svc}"
-    docker compose up -d "${svc}"
-  done < <(compose_services)
+    up_services+=("${svc}")
+  done < <(always_on_services)
+
+  docker compose up -d "${up_services[@]}"
 
   if [[ ${#pull_failed[@]} -gt 0 ]]; then
     echo "ERROR: failed to pull: ${pull_failed[*]}" >&2
@@ -87,8 +125,16 @@ EOF
     rm -f docker-compose.override.yml
   fi
 
-  echo "==> Pull ${COMPOSE_SERVICE} (tag=${IMAGE_TAG})"
-  docker compose pull "${COMPOSE_SERVICE}"
+  if [[ "${COMPOSE_SERVICE}" == "service-orchestrator" ]]; then
+    echo "==> Build ${COMPOSE_SERVICE}"
+    docker compose build "${COMPOSE_SERVICE}"
+  else
+    echo "==> Pull ${COMPOSE_SERVICE} (tag=${IMAGE_TAG})"
+    pull_service "${COMPOSE_SERVICE}" || {
+      echo "ERROR: pull failed for ${COMPOSE_SERVICE}" >&2
+      exit 1
+    }
+  fi
   echo "==> Up ${COMPOSE_SERVICE}"
   docker compose up -d "${COMPOSE_SERVICE}"
   docker compose logs --tail=40 "${COMPOSE_SERVICE}" 2>&1 || true

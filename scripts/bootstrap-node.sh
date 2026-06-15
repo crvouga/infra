@@ -41,7 +41,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=${DEPLOY_DIR}
 EnvironmentFile=-${DEPLOY_DIR}/.env
-ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStart=${DEPLOY_DIR}/scripts/start-stack.sh
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=600
 

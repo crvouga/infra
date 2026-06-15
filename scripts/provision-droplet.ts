@@ -46,7 +46,7 @@ type Args = {
 function parseArgs(argv: readonly string[]): Args {
   let dryRun = false;
   let region = "nyc3";
-  let size = "s-4vcpu-8gb";
+  let size = "s-2vcpu-4gb";
   let skipIfSecretsExist = false;
   let triggerDeploy = true;
   for (let i = 0; i < argv.length; i++) {
@@ -58,7 +58,7 @@ function parseArgs(argv: readonly string[]): Args {
     else if (arg === "--no-deploy") triggerDeploy = false;
     else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: bun run scripts/provision-droplet.ts [--dry-run] [--region nyc3] [--size s-4vcpu-8gb] [--skip-if-secrets-exist] [--no-deploy]",
+        "Usage: bun run scripts/provision-droplet.ts [--dry-run] [--region nyc3] [--size s-2vcpu-4gb] [--skip-if-secrets-exist] [--no-deploy]",
       );
       process.exit(0);
     } else {

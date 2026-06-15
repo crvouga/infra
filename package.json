@@ -14,6 +14,7 @@
     "make-ghcr-public": "bun run scripts/make-ghcr-public.ts",
     "compose-check": "bun run scripts/generate-compose.ts --check",
     "provision-droplet": "bun run scripts/provision-droplet.ts",
+    "resize-droplet": "bun run scripts/resize-droplet.ts",
     "migrate-node-ssh-to-vault": "bun run scripts/migrate-node-ssh-to-vault.ts",
     "migrate-vault-node-ssh-keys": "bun run scripts/migrate-vault-node-ssh-keys.ts",
     "seed-vault-github-secret": "bun run scripts/seed-vault-github-secret.ts",

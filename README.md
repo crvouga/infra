@@ -8,6 +8,8 @@ Cloudflare terminates TLS at the edge (proxied DNS). Traefik on the droplet serv
 
 Platform paths, network names, and GHCR prefixes are derived from `services.yaml` — not hardcoded in scripts.
 
+**On-demand runtime:** Most services default to `runtime: on_demand`. The `service-orchestrator` container wakes them on first HTTP request and stops them after an idle timeout (default 30 minutes). Only `traefik`, `vault`, and `service-orchestrator` stay running at idle.
+
 ## Architecture
 
 ```
@@ -27,6 +29,12 @@ Project repos ──▶ ghcr.io (public images)
                         ▼
               DO Droplet + Traefik :80
                         │
+          ┌─────────────┴─────────────┐
+          ▼                           ▼
+   always_on (vault)          service-orchestrator
+                                      │
+                              wake / stop on_demand apps
+                        │
                         ▼
                  *.<zone from services.yaml>
 ```
@@ -41,8 +49,12 @@ Project repos ──▶ ghcr.io (public images)
 | `infra_github_repo` | GitHub repo slug for this infra repo |
 | `droplet_name` | DO droplet name (default `origin`) |
 | `do_project_name` | DigitalOcean project (default `projects`) |
+| `orchestrator.idle_timeout_minutes` | Stop on-demand services after N minutes idle (default `30`) |
+| `runtime` | Per service: `always_on` or `on_demand` (default `on_demand`) |
 
 Derived automatically: `image_prefix` (`chrisvouga-dev`), deploy dir (`/opt/chrisvouga-dev`), Docker network (`chrisvouga-dev-web`), Vault URL (`https://vault.<zone>`).
+
+Default droplet size for new provisions: **s-2vcpu-4gb** (2 vCPU, 4 GB RAM).
 
 Inspect derived values:
 
@@ -77,7 +89,7 @@ Node SSH credentials live in shared Vault — provisioning writes them automatic
 
 In GitHub Actions → **Setup** → Run workflow:
 
-- `provision_droplet: true` (default) — creates `origin` droplet in DO project `projects` (8 GB, Ubuntu 24.04), installs Docker, writes `NODE_SSH_*` to Vault
+- `provision_droplet: true` (default) — creates `origin` droplet in DO project `projects` (4 GB, Ubuntu 24.04), installs Docker, writes `NODE_SSH_*` to Vault
 - `deploy: true` (default) — triggers **Deploy Pipeline**
 
 Skips droplet creation if `NODE_SSH_HOST` is already in Vault. One-time migration from legacy GitHub `NODE_SSH_*` repo secrets runs automatically when present.
@@ -109,14 +121,18 @@ Sibling repo pushes trigger `repository_dispatch` → **Deploy Pipeline** per se
 | Path | Purpose |
 |------|---------|
 | [`services.yaml`](services.yaml) | Zone, hostnames, ports, images, repo URLs, build paths, secrets |
-| [`docker-compose.yml`](docker-compose.yml) | Generated Traefik + app services + infra (Netdata, Dozzle) |
+| [`docker-compose.yml`](docker-compose.yml) | Generated Traefik + app services + infra (orchestrator, Netdata, Dozzle) |
 | [`traefik/traefik.yml`](traefik/traefik.yml) | Generated HTTP-only edge proxy config |
+| [`apps/service-orchestrator/`](apps/service-orchestrator/) | On-demand wake/stop proxy (built on node) |
+| [`scripts/start-stack.sh`](scripts/start-stack.sh) | Boot always-on services only |
+| [`scripts/resize-droplet.ts`](scripts/resize-droplet.ts) | Power off → resize → power on existing droplet |
 | [`scripts/provision-droplet.ts`](scripts/provision-droplet.ts) | DO droplet + Vault SSH credentials |
 | [`scripts/print-platform-env.ts`](scripts/print-platform-env.ts) | Derived platform env for CI |
 | [`scripts/rollout-publish-workflows.ts`](scripts/rollout-publish-workflows.ts) | Push CI to all project repos |
 | [`.github/workflows/setup.yml`](.github/workflows/setup.yml) | One-click bootstrap |
 | [`.github/workflows/deploy-pipeline.yml`](.github/workflows/deploy-pipeline.yml) | Deploy orchestrator |
 | [`.github/workflows/provision-node.yml`](.github/workflows/provision-node.yml) | Droplet-only provision |
+| [`.github/workflows/resize-node.yml`](.github/workflows/resize-node.yml) | Resize existing droplet |
 | [`.github/workflows/reusable-publish-image.yml`](.github/workflows/reusable-publish-image.yml) | Called by each project repo |
 
 Regenerate compose after editing `services.yaml`:
@@ -132,12 +148,32 @@ bun run generate-compose
 | **Setup** | `workflow_dispatch` | Provision droplet → trigger deploy |
 | **Deploy Pipeline** | push / dispatch / `workflow_dispatch` | Full deploy |
 | **Provision node** | `workflow_dispatch` | Droplet only |
+| **Resize node** | `workflow_dispatch` | Resize existing droplet → deploy |
 | Per-repo **publish-image** | push to `main` | Build ghcr image → dispatch deploy |
+
+## Rollout: downsize + on-demand orchestrator
+
+1. Merge and deploy orchestrator changes while the droplet is still at its current size.
+2. Verify wake/stop: visit an on-demand app (e.g. `https://www.chrisvouga.dev`), then check `https://orchestrator.chrisvouga.dev/status`.
+3. Run **Resize node** workflow with target `s-2vcpu-4gb` (~5–10 min downtime).
+4. Confirm vault health; spot-check 2–3 on-demand apps.
+
+**Tradeoffs:** first request to an idle app may take 15–60s (cold start). Full deploy health-checks only `always_on` services; single-service deploys use a 90s cold-start timeout for on-demand apps.
+
+## Service orchestrator ops
+
+| URL | Purpose |
+|-----|---------|
+| `https://orchestrator.<zone>/health` | Liveness |
+| `https://orchestrator.<zone>/status` | Per-service state (running / stopped / last request) |
+
+Built on the node during deploy (`docker compose build service-orchestrator`). Routes all `on_demand` hostnames through Traefik to the orchestrator, which proxies to the real container after wake.
 
 ## Local scripts
 
 ```bash
 bun run provision-droplet -- --dry-run
+bun run resize-droplet -- --dry-run --size s-2vcpu-4gb
 bun run rollout-publish -- --dry-run
 bun run sync-dns -- --apply
 bun run health-check
@@ -151,12 +187,15 @@ Set SSL/TLS mode to **Flexible** — origin serves HTTP on port 80; Cloudflare s
 
 ## Infra monitoring
 
-Upstream Docker images defined in `services.yaml` → `infra_services` (not built via GHCR):
+Upstream Docker images defined in `services.yaml` → `infra_services` (Netdata, Dozzle use public images; orchestrator is built on-node):
 
 | URL | Tool | Auth |
 |-----|------|------|
+| `orchestrator.<zone>` | On-demand wake/stop status | None |
 | `netdata.<zone>` | Host + container metrics | Traefik basic auth (`NETDATA_USERNAME`, `NETDATA_PASSWORD`) |
 | `dozzle.<zone>` | Live Docker logs | Dozzle login (`DOZZLE_USERNAME`, `DOZZLE_PASSWORD`) |
+
+Netdata and Dozzle are **on-demand** — first visit wakes the container (may take up to ~60s).
 
 Passwords are stored plain in Vault and bcrypt-hashed at deploy by `sync-secrets`. Add these keys before the first full deploy (or run `bun run generate-infra-auth` — no Docker required):
 

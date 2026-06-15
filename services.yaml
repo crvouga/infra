@@ -11,6 +11,9 @@ infra_github_repo: crvouga/infra
 skip_rollout_repos:
   - crvouga/portfolio
 
+orchestrator:
+  idle_timeout_minutes: 30
+
 services:
   - id: portfolio
     hostname: www.chrisvouga.dev
@@ -194,6 +197,7 @@ services:
     health_check: true
 
   - id: vault
+    runtime: always_on
     hostname: vault.chrisvouga.dev
     github_repo: crvouga/vault
     source_code_url: https://github.com/crvouga/vault
@@ -310,6 +314,24 @@ aliases:
     target: normalizer.chrisvouga.dev
 
 infra_services:
+  - id: service-orchestrator
+    hostname: orchestrator.chrisvouga.dev
+    runtime: always_on
+    build:
+      dockerfile: apps/service-orchestrator/Dockerfile
+      context: .
+    port: 8080
+    health_check: false
+    health_path: /health
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./services.yaml:/config/services.yaml:ro
+      - .:/opt/chrisvouga-dev:ro
+    env:
+      COMPOSE_PROJECT_DIR: /opt/chrisvouga-dev
+      SERVICES_CONFIG_PATH: /config/services.yaml
+      IDLE_TIMEOUT_MINUTES: "30"
+
   - id: netdata
     hostname: netdata.chrisvouga.dev
     image: netdata/netdata:stable

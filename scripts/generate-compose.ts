@@ -12,8 +12,10 @@ import {
   composeServiceName,
   dockerNetworkName,
   imageRepo,
+  isAlwaysOn,
   isPublicService,
   loadServicesConfig,
+  onDemandPublicTargets,
   type InfraServiceSpec,
   type ServiceSpec,
   type ServicesConfig,
@@ -53,8 +55,35 @@ function traefikLabels(
       - traefik.http.services.${router}.loadbalancer.server.port=${port}`;
 }
 
+function orchestratorTraefikLabels(config: ServicesConfig, orchestratorPort: number): string {
+  const lines = ["    labels:", "      - traefik.enable=true"];
+  const orchRouter = routerName("service-orchestrator");
+  lines.push(
+    `      - traefik.http.routers.${orchRouter}.rule=Host(\`orchestrator.${config.zone}\`)`,
+    `      - traefik.http.routers.${orchRouter}.entrypoints=web`,
+    `      - traefik.http.routers.${orchRouter}.middlewares=${traefikMiddlewares()}`,
+    `      - traefik.http.services.${orchRouter}.loadbalancer.server.port=${orchestratorPort}`,
+  );
+
+  for (const target of onDemandPublicTargets(config)) {
+    const router = routerName(target.id);
+    lines.push(
+      `      - traefik.http.routers.${router}.rule=Host(\`${target.hostname}\`)`,
+      `      - traefik.http.routers.${router}.entrypoints=web`,
+      `      - traefik.http.routers.${router}.middlewares=${traefikMiddlewares(target.traefik_middlewares)}`,
+      `      - traefik.http.services.${router}.loadbalancer.server.port=${orchestratorPort}`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function yamlList(items: readonly string[], indent: string): string {
   return items.map((item) => `${indent}- ${item}`).join("\n");
+}
+
+function restartPolicy(service: ServiceSpec | InfraServiceSpec): string {
+  return isAlwaysOn(service) ? "unless-stopped" : "no";
 }
 
 function serviceBlock(service: ServiceSpec, config: ServicesConfig): string {
@@ -76,19 +105,22 @@ function serviceBlock(service: ServiceSpec, config: ServicesConfig): string {
       ? `    depends_on:\n${service.depends_on.map((d) => `      - ${composeServiceName(d)}`).join("\n")}\n`
       : "";
   const routing =
-    isPublicService(service) && service.hostname && service.port != null
+    isAlwaysOn(service) &&
+    isPublicService(service) &&
+    service.hostname &&
+    service.port != null
       ? traefikLabels(service.id, service.hostname, service.port)
       : "";
 
   return `  ${name}:
     image: ${image}:\${IMAGE_TAG:-${config.default_image_tag}}
-    restart: unless-stopped
+    restart: ${restartPolicy(service)}
     networks:
       - web
 ${envFile}${environment}${dependsOn}${routing}`;
 }
 
-function infraServiceBlock(service: InfraServiceSpec): string {
+function infraServiceBlock(service: InfraServiceSpec, config: ServicesConfig): string {
   const name = composeServiceName(service.id);
   const envLines = service.env
     ? Object.entries(service.env)
@@ -110,16 +142,25 @@ function infraServiceBlock(service: InfraServiceSpec): string {
       ? `    security_opt:\n${yamlList(service.security_opt, "      ")}\n`
       : "";
   const pid = service.pid ? `    pid: ${service.pid}\n` : "";
-  const routing = traefikLabels(
-    service.id,
-    service.hostname,
-    service.port,
-    service.traefik_middlewares,
-  );
+
+  const imageOrBuild = service.build
+    ? `    build:\n      context: ${service.build.context}\n      dockerfile: ${service.build.dockerfile}\n`
+    : `    image: ${service.image}\n`;
+
+  let routing = "";
+  if (service.id === "service-orchestrator") {
+    routing = orchestratorTraefikLabels(config, service.port);
+  } else if (isAlwaysOn(service)) {
+    routing = traefikLabels(
+      service.id,
+      service.hostname,
+      service.port,
+      service.traefik_middlewares,
+    );
+  }
 
   return `  ${name}:
-    image: ${service.image}
-    restart: unless-stopped
+${imageOrBuild}    restart: ${restartPolicy(service)}
     networks:
       - web
 ${pid}${capAdd}${securityOpt}${volumes}${environment}${routing}`;
@@ -152,7 +193,7 @@ function generateCompose(config: ServicesConfig): string {
     .map((s) => serviceBlock(s, config))
     .join("\n");
   const infraYaml = (config.infra_services ?? [])
-    .map((s) => infraServiceBlock(s))
+    .map((s) => infraServiceBlock(s, config))
     .join("\n");
   const namedVolumes = volumesBlock(collectNamedVolumes(config));
   const project = composeProjectName(config);
