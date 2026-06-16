@@ -123,8 +123,10 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
+      - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Reconcile DNS
         env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
           SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
           CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
         run: |
@@ -280,8 +282,10 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: https://crvouga-vault.fly.dev
+      - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Reconcile DNS
         env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
           SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
           CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
         run: |
