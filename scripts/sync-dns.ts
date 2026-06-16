@@ -2,21 +2,31 @@
 /**
  * Reconcile Cloudflare DNS for Fly.io apps.
  *
- * Per public hostname: CNAME → crvouga-{id}.fly.dev (proxied).
+ * Per public hostname: A/AAAA → Fly ingress (DNS-only; Fly terminates TLS).
  *
  * Usage:
  *   bun run scripts/sync-dns.ts
  *   bun run scripts/sync-dns.ts --apply
  *   bun run scripts/sync-dns.ts --id pickflix --apply
  */
+import { $ } from "bun";
 import { CloudflareApi, cloudflareCredentialsFromEnv, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
 import {
   allDnsTargets,
+  flyAppName,
   flyAppHostname,
   loadServicesConfig,
   type DnsTarget,
   type ServicesConfig,
 } from "../lib/services.js";
+import { requireFlyApiToken } from "../lib/fly-token.js";
+
+type RecordType = "A" | "AAAA" | "CNAME";
+
+type DesiredRecord = {
+  readonly type: RecordType;
+  readonly content: string;
+};
 
 type Args = {
   readonly ids: readonly string[];
@@ -28,7 +38,7 @@ type Args = {
 function parseArgs(argv: readonly string[]): Args {
   const ids: string[] = [];
   let apply = false;
-  let proxied = true;
+  let proxied = false;
   let pruneOrphans = true;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -68,9 +78,52 @@ function flyCnameTarget(config: ServicesConfig, id: string): string {
   return flyAppHostname(config, id);
 }
 
+let cachedFlyIngress = new Map<string, { readonly v4?: string; readonly v6?: string }>();
+
+async function flyIngressIps(app: string): Promise<{ readonly v4?: string; readonly v6?: string }> {
+  const cached = cachedFlyIngress.get(app);
+  if (cached) return cached;
+  requireFlyApiToken();
+  const result = await $`flyctl ips list -a ${app} --json`.env({ ...process.env }).quiet().nothrow();
+  if (result.exitCode !== 0) {
+    throw new Error(`flyctl ips list (${app}) failed: ${result.stderr.toString().trim()}`);
+  }
+  const ips = JSON.parse(result.stdout.toString()) as Array<{ Address?: string; Type?: string }>;
+  const v4 = ips.find((ip) => ip.Type === "shared_v4" || ip.Type === "v4")?.Address;
+  const v6 = ips.find((ip) => ip.Type === "v6")?.Address;
+  const resolved = { v4, v6 };
+  cachedFlyIngress.set(app, resolved);
+  return resolved;
+}
+
+async function desiredRecords(
+  config: ServicesConfig,
+  id: string,
+  proxied: boolean,
+): Promise<readonly DesiredRecord[]> {
+  if (proxied) {
+    return [{ type: "CNAME", content: flyCnameTarget(config, id) }];
+  }
+  const app = flyAppName(config, id);
+  const ips = await flyIngressIps(app);
+  const out: DesiredRecord[] = [];
+  if (ips.v4) out.push({ type: "A", content: ips.v4 });
+  if (ips.v6) out.push({ type: "AAAA", content: ips.v6 });
+  if (out.length === 0) {
+    throw new Error("No Fly ingress IPs found — deploy an app first");
+  }
+  return out;
+}
+
 type Action =
-  | { readonly kind: "create"; readonly name: string; readonly type: "CNAME"; readonly content: string }
-  | { readonly kind: "update"; readonly name: string; readonly type: "CNAME"; readonly content: string; readonly recordId: string; readonly reason: string }
+  | { readonly kind: "create"; readonly name: string; readonly record: DesiredRecord }
+  | {
+      readonly kind: "update";
+      readonly name: string;
+      readonly record: DesiredRecord;
+      readonly recordId: string;
+      readonly reason: string;
+    }
   | { readonly kind: "delete"; readonly name: string; readonly recordId: string; readonly reason: string }
   | { readonly kind: "ok"; readonly name: string };
 
@@ -115,40 +168,49 @@ async function planActions(
 
   for (const service of services) {
     desiredNames.add(service.hostname);
-    const target = flyCnameTarget(config, service.id);
+    const targets = await desiredRecords(config, service.id, args.proxied);
     const existing = byName.get(service.hostname) ?? [];
-    const cnames = existing.filter((r) => r.type === "CNAME");
-    const others = existing.filter((r) => r.type !== "CNAME");
+    const managedTypes = new Set(targets.map((t) => t.type));
 
-    for (const o of others) {
-      actions.push({
-        kind: "delete",
-        name: o.name,
-        recordId: o.id,
-        reason: `non-CNAME ${o.type} collides with managed CNAME`,
-      });
+    for (const record of existing) {
+      if (!managedTypes.has(record.type as RecordType)) {
+        actions.push({
+          kind: "delete",
+          name: record.name,
+          recordId: record.id,
+          reason: `unmanaged ${record.type} for Fly hostname`,
+        });
+      }
     }
 
-    if (cnames.length === 0) {
-      actions.push({ kind: "create", name: service.hostname, type: "CNAME", content: target });
-      continue;
+    for (const target of targets) {
+      const matches = existing.filter((r) => r.type === target.type);
+      if (matches.length === 0) {
+        actions.push({ kind: "create", name: service.hostname, record: target });
+        continue;
+      }
+
+      const [primary, ...extra] = matches;
+      for (const e of extra) {
+        actions.push({ kind: "delete", name: e.name, recordId: e.id, reason: `duplicate ${target.type}` });
+      }
+
+      if (primary!.content !== target.content || primary!.proxied !== args.proxied) {
+        actions.push({
+          kind: "update",
+          name: service.hostname,
+          record: target,
+          recordId: primary!.id,
+          reason: "content/proxied drift",
+        });
+      }
     }
 
-    const [primary, ...extra] = cnames;
-    for (const e of extra) {
-      actions.push({ kind: "delete", name: e.name, recordId: e.id, reason: "duplicate CNAME" });
-    }
-
-    if (primary!.content !== target || primary!.proxied !== args.proxied) {
-      actions.push({
-        kind: "update",
-        name: service.hostname,
-        type: "CNAME",
-        content: target,
-        recordId: primary!.id,
-        reason: "content/proxied drift",
-      });
-    } else {
+    const allOk = targets.every((target) => {
+      const primary = existing.find((r) => r.type === target.type);
+      return primary?.content === target.content && primary.proxied === args.proxied;
+    });
+    if (allOk && targets.every((t) => existing.some((r) => r.type === t.type))) {
       actions.push({ kind: "ok", name: service.hostname });
     }
   }
@@ -164,15 +226,15 @@ async function planActions(
           reason: "legacy origin A record (DO droplet)",
         });
       }
-      if (r.type !== "CNAME") continue;
-      if (!r.content.endsWith(".fly.dev")) continue;
+      if (!["CNAME", "A", "AAAA"].includes(r.type)) continue;
       if (desiredNames.has(r.name)) continue;
       if (!r.name.endsWith(config.zone) && !r.name.includes(`.${config.zone}`)) continue;
+      if (r.type === "CNAME" && !r.content.endsWith(".fly.dev")) continue;
       actions.push({
         kind: "delete",
         name: r.name,
         recordId: r.id,
-        reason: `orphan CNAME → ${r.content}`,
+        reason: `orphan ${r.type} → ${r.content}`,
       });
     }
   }
@@ -183,9 +245,9 @@ async function planActions(
 function summarise(action: Action): string {
   switch (action.kind) {
     case "create":
-      return `CREATE ${action.name} ${action.type} → ${action.content}`;
+      return `CREATE ${action.name} ${action.record.type} → ${action.record.content}`;
     case "update":
-      return `UPDATE ${action.name}: ${action.reason}`;
+      return `UPDATE ${action.name} ${action.record.type}: ${action.reason}`;
     case "delete":
       return `DELETE ${action.name} (${action.reason})`;
     case "ok":
@@ -204,8 +266,8 @@ async function applyAction(
     case "create":
       await cf.createDnsRecord(zoneId, {
         name: action.name,
-        type: action.type,
-        content: action.content,
+        type: action.record.type,
+        content: action.record.content,
         proxied: args.proxied,
         ttl: 1,
         comment: managedComment,
@@ -214,8 +276,8 @@ async function applyAction(
     case "update":
       await cf.updateDnsRecord(zoneId, action.recordId, {
         name: action.name,
-        type: action.type,
-        content: action.content,
+        type: action.record.type,
+        content: action.record.content,
         proxied: args.proxied,
         ttl: 1,
         comment: managedComment,
