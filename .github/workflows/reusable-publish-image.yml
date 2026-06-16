@@ -44,12 +44,14 @@ on:
         default: crvouga
       image_prefix:
         description: "GHCR package prefix (zone slug, e.g. chrisvouga-dev)."
-        required: true
+        required: false
         type: string
+        default: chrisvouga-dev
       infra_github_repo:
         description: "Infra repo owner/name for deploy dispatch."
-        required: true
+        required: false
         type: string
+        default: crvouga/infra
     secrets:
       DEPLOY_DISPATCH_TOKEN:
         description: "PAT or GITHUB_TOKEN with repo dispatch to the infra repo."
@@ -90,23 +92,31 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PKG: ${{ inputs.image_prefix }}-${{ inputs.service_id }}
+          OWNER: ${{ inputs.image_owner }}
         run: |
           set -euo pipefail
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X PATCH \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -H "Content-Type: application/json" \
-            -d '{"visibility":"public"}' \
-            "https://api.github.com/user/packages/container/${PKG}/visibility")
-          if [ "${STATUS}" = "404" ]; then
-            echo "Package not found yet (first push) — visibility can be set on next run"
-          elif [ "${STATUS}" -ge 200 ] && [ "${STATUS}" -lt 300 ]; then
-            echo "Package ${PKG} is public"
-          else
-            echo "Warning: could not set ${PKG} public (HTTP ${STATUS})"
-          fi
+          for URL in \
+            "https://api.github.com/user/packages/container/${PKG}/visibility" \
+            "https://api.github.com/orgs/${OWNER}/packages/container/${PKG}/visibility"
+          do
+            STATUS=$(curl -s -o /tmp/ghcr-vis-body.txt -w "%{http_code}" \
+              -X PATCH \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/json" \
+              -d '{"visibility":"public"}' \
+              "${URL}")
+            if [ "${STATUS}" -ge 200 ] && [ "${STATUS}" -lt 300 ]; then
+              echo "Package ${PKG} is public (${URL})"
+              exit 0
+            fi
+            if [ "${STATUS}" != "404" ]; then
+              echo "Warning: could not set ${PKG} public via ${URL} (HTTP ${STATUS})"
+              cat /tmp/ghcr-vis-body.txt || true
+            fi
+          done
+          echo "Package ${PKG} visibility not updated (may not exist yet on first push)"
 
       - name: Notify infra deploy
         env:

@@ -20,31 +20,46 @@ function token(): string {
   return t;
 }
 
-async function setPublic(owner: string, packageName: string, dryRun: boolean): Promise<void> {
-  const url = `https://api.github.com/user/packages/container/${packageName}/visibility`;
+async function setPublic(
+  owner: string,
+  packageName: string,
+  dryRun: boolean,
+): Promise<void> {
+  const urls = [
+    `https://api.github.com/user/packages/container/${packageName}/visibility`,
+    `https://api.github.com/orgs/${owner}/packages/container/${packageName}/visibility`,
+  ];
+
   if (dryRun) {
     console.log(`[plan] PATCH ${owner}/${packageName} → public`);
     return;
   }
-  const res = await fetch(url, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token()}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ visibility: "public" }),
-  });
-  if (res.status === 404) {
-    console.warn(`  skip ${packageName}: package not found yet`);
-    return;
-  }
-  if (!res.ok) {
+
+  let lastError = "";
+  for (const url of urls) {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token()}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ visibility: "public" }),
+    });
+    if (res.status === 404) {
+      lastError = `not found at ${url}`;
+      continue;
+    }
+    if (res.ok) {
+      console.log(`  public ${owner}/${packageName}`);
+      return;
+    }
     const text = await res.text();
-    throw new Error(`Failed to set ${packageName} public (HTTP ${res.status}): ${text}`);
+    lastError = `HTTP ${res.status} at ${url}: ${text}`;
   }
-  console.log(`  public ${owner}/${packageName}`);
+
+  console.warn(`  skip ${packageName}: ${lastError}`);
 }
 
 async function main(): Promise<void> {

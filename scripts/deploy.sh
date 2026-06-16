@@ -34,13 +34,48 @@ is_infra_service() {
   ' services.yaml
 }
 
+service_image() {
+  local svc="$1"
+  docker compose config --images "${svc}" 2>/dev/null | head -1
+}
+
+image_exists_locally() {
+  local image="$1"
+  [[ -n "${image}" ]] && docker image inspect "${image}" >/dev/null 2>&1
+}
+
+# Stop anything holding host port 80 before traefik recreate (avoids bind races).
+free_host_port() {
+  local port="$1"
+  local ids names
+  ids="$(docker ps -q --filter "publish=${port}" 2>/dev/null || true)"
+  [[ -z "${ids}" ]] && return 0
+  names="$(docker ps --filter "publish=${port}" --format '{{.Names}}' | tr '\n' ' ')"
+  echo "==> Stopping containers on port ${port}: ${names}"
+  docker stop ${ids}
+  docker rm -f ${ids} 2>/dev/null || true
+}
+
 pull_service() {
   local svc="$1"
   if [[ "${svc}" == "service-orchestrator" ]]; then
     echo "---- skip pull ${svc} (built on node)"
     return 0
   fi
-  docker compose pull "${svc}"
+
+  local image
+  image="$(service_image "${svc}")"
+
+  if docker compose pull "${svc}"; then
+    return 0
+  fi
+
+  if image_exists_locally "${image}"; then
+    echo "WARN: pull failed for ${svc}, using cached image ${image}" >&2
+    return 0
+  fi
+
+  return 1
 }
 
 always_on_services() {
@@ -64,6 +99,33 @@ always_on_services() {
     section != "" && id != "" && /^    runtime: always_on/ { runtime = "always_on"; next }
     END { flush_runtime() }
   ' services.yaml
+}
+
+up_always_on_services() {
+  local -a services=("$@")
+  local -a rest=()
+  local has_traefik=false
+
+  for svc in "${services[@]}"; do
+    if [[ "${svc}" == "traefik" ]]; then
+      has_traefik=true
+    else
+      rest+=("${svc}")
+    fi
+  done
+
+  if [[ "${has_traefik}" == true ]]; then
+    free_host_port 80
+    docker compose stop traefik 2>/dev/null || true
+    docker compose rm -f traefik 2>/dev/null || true
+    echo "---- up traefik"
+    docker compose up -d traefik
+  fi
+
+  if [[ ${#rest[@]} -gt 0 ]]; then
+    echo "---- up ${rest[*]}"
+    docker compose up -d "${rest[@]}"
+  fi
 }
 
 deploy_all_services() {
@@ -93,17 +155,18 @@ deploy_all_services() {
   local up_services=()
   for svc in "${pull_targets[@]}"; do
     if [[ " ${always_on_failed[*]:-} " == *" ${svc} "* ]]; then
-      echo "---- skip ${svc} (pull failed)"
+      echo "---- skip ${svc} (pull failed, no cached image)"
       continue
     fi
     up_services+=("${svc}")
   done
 
-  docker compose up -d "${up_services[@]}"
+  up_always_on_services "${up_services[@]}"
 
   if [[ ${#always_on_failed[@]} -gt 0 ]]; then
     echo "ERROR: failed to pull always-on service(s): ${always_on_failed[*]}" >&2
     echo "       publish the image and ensure the ghcr package is public" >&2
+    echo "       run: bun run make-ghcr-public" >&2
     exit 1
   fi
 }
@@ -135,6 +198,13 @@ EOF
       exit 1
     }
   fi
+
+  if [[ "${COMPOSE_SERVICE}" == "traefik" ]]; then
+    free_host_port 80
+    docker compose stop traefik 2>/dev/null || true
+    docker compose rm -f traefik 2>/dev/null || true
+  fi
+
   echo "==> Up ${COMPOSE_SERVICE}"
   docker compose up -d "${COMPOSE_SERVICE}"
   docker compose logs --tail=40 "${COMPOSE_SERVICE}" 2>&1 || true

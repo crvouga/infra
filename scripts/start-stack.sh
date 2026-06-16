@@ -6,6 +6,16 @@ DEPLOY_DIR="${DEPLOY_DIR:-/opt/chrisvouga-dev}"
 
 cd "${DEPLOY_DIR}"
 
+free_host_port() {
+  local port="$1"
+  local ids
+  ids="$(docker ps -q --filter "publish=${port}" 2>/dev/null || true)"
+  [[ -z "${ids}" ]] && return 0
+  echo "==> Stopping containers on port ${port}"
+  docker stop ${ids}
+  docker rm -f ${ids} 2>/dev/null || true
+}
+
 always_on_services() {
   awk '
     function flush_runtime() {
@@ -40,5 +50,19 @@ done < <(always_on_services)
 
 echo "==> Starting always-on services: ${SERVICES[*]}"
 docker compose build service-orchestrator 2>/dev/null || true
-docker compose up -d "${SERVICES[@]}"
+
+free_host_port 80
+docker compose stop traefik 2>/dev/null || true
+docker compose rm -f traefik 2>/dev/null || true
+docker compose up -d traefik
+
+REST=()
+for svc in "${SERVICES[@]}"; do
+  [[ "${svc}" == "traefik" ]] && continue
+  REST+=("${svc}")
+done
+if [[ ${#REST[@]} -gt 0 ]]; then
+  docker compose up -d "${REST[@]}"
+fi
+
 docker compose ps
