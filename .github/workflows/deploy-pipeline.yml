@@ -164,15 +164,14 @@ jobs:
           vault_addr: ${{ env.VAULT_ADDR }}
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Sync Fly secrets
-        if: ${{ secrets.FLY_TOKEN != '' }}
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
           if [ -z "${FLY_TOKEN:-}" ]; then
-            echo "ERROR: FLY_TOKEN is required" >&2
-            exit 1
+            echo "::warning::FLY_TOKEN not set — skipping sync-fly-secrets"
+            exit 0
           fi
           if [ -n "${DB_CONNECTION_URI:-}" ]; then
             {
