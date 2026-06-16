@@ -1,28 +1,53 @@
-name: Unseal
+name: Fly deploy
 
-# Manual/external re-unseal of OpenBao. fly-deploy.yml unseals automatically
-# after each deploy; use this for out-of-band recovery (e.g. after a restart).
+# Deploys vault standalone: Fly deploy -> DNS reconcile -> unseal -> smoke test.
+# Runs after publish-image.yml pushes a new image to ghcr.io.
 
 on:
+  workflow_run:
+    workflows: [Publish image]
+    types: [completed]
   workflow_dispatch:
-  repository_dispatch:
-    types:
-      - vault-unseal
 
 concurrency:
-  group: unseal-${{ github.ref }}
+  group: fly-deploy-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  CUSTOM_DOMAIN: vault.chrisvouga.dev
+  VAULT_ADDR: https://vault.chrisvouga.dev
 
 jobs:
-  unseal:
-    name: Unseal and smoke test
+  deploy:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Sync Fly secrets
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+        run: flyctl secrets set DB_CONNECTION_URI="${DB_CONNECTION_URI}" --config fly.toml
+
+      - name: Deploy to Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config fly.toml --wait-timeout 15m
+
+      - name: Ensure cert
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl certs add vault.chrisvouga.dev --config fly.toml || true
+
+      - name: Reconcile DNS
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          chmod +x scripts/sync-dns.sh
+          ./scripts/sync-dns.sh
 
       - name: Install dependencies
         run: |
@@ -40,7 +65,6 @@ jobs:
 
       - name: Unseal OpenBao
         env:
-          VAULT_ADDR: https://${{ env.CUSTOM_DOMAIN }}
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
@@ -51,11 +75,8 @@ jobs:
 
       - name: Smoke test
         env:
-          VAULT_ADDR: https://${{ env.CUSTOM_DOMAIN }}
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
-          chmod +x scripts/install-vault-cli.sh scripts/fetch-vault-token.sh scripts/smoke-test.sh
-          ./scripts/install-vault-cli.sh
           export VAULT_TOKEN="$(./scripts/fetch-vault-token.sh)"
           ./scripts/smoke-test.sh

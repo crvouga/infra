@@ -1,7 +1,7 @@
 name: Migrate DB
 
 # Run Postgres schema migrations for OpenBao storage.
-# Image build/push and deploy are handled by publish-image.yml + chrisvouga.dev.
+# Image build/push and Fly deploy are handled by publish-image.yml + fly-deploy.yml.
 
 on:
   push:
