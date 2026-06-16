@@ -55,14 +55,15 @@ jobs:
           sudo apt install gh -y
       - name: Resize DigitalOcean droplet
         env:
+          SIZE_INPUT: ${{ inputs.size }}
           GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
           DIGITALOCEAN_TOKEN: ${{ env.DIGITALOCEAN_TOKEN }}
           VAULT_ADDR: ${{ env.VAULT_ADDR }}
           VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
         run: |
           set -euo pipefail
-          SIZE_RAW="${{ inputs.size }}"
-          SIZE="${SIZE_RAW%% —*}"
+          # Slug is the first token (labels include "$24/mo" — must not expand in bash)
+          SIZE="$(printf '%s' "$SIZE_INPUT" | awk '{print $1}')"
           echo "Target size slug: ${SIZE}"
           ARGS=(--size "${SIZE}")
           if [ "${{ inputs.trigger_deploy }}" != "true" ]; then
