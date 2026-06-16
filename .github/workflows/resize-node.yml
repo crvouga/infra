@@ -4,10 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       size:
-        description: "Target droplet size slug"
-        required: false
-        type: string
-        default: s-2vcpu-4gb
+        description: "Basic Droplet size (nyc3). Monthly price is DO's capped rate; billed per-second with 60s minimum."
+        required: true
+        type: choice
+        default: "s-2vcpu-4gb — $24/mo (2 vCPU · 4 GiB · 80 GiB SSD)"
+        options:
+          - "s-1vcpu-512mb-10gb — $4/mo (1 vCPU · 512 MiB · 10 GiB SSD)"
+          - "s-1vcpu-1gb — $6/mo (1 vCPU · 1 GiB · 25 GiB SSD)"
+          - "s-1vcpu-2gb — $12/mo (1 vCPU · 2 GiB · 50 GiB SSD)"
+          - "s-2vcpu-2gb — $18/mo (2 vCPU · 2 GiB · 60 GiB SSD)"
+          - "s-2vcpu-4gb — $24/mo (2 vCPU · 4 GiB · 80 GiB SSD)"
+          - "s-4vcpu-8gb — $48/mo (4 vCPU · 8 GiB · 160 GiB SSD)"
+          - "s-8vcpu-16gb — $96/mo (8 vCPU · 16 GiB · 320 GiB SSD)"
       trigger_deploy:
         description: "Run deploy-pipeline after resize"
         required: false
@@ -17,6 +25,14 @@ on:
 permissions:
   id-token: write
   contents: read
+
+# Fallback when Vault OIDC is unavailable — same as deploy-pipeline.
+env:
+  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+  GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
+  NODE_SSH_HOST: ${{ secrets.NODE_SSH_HOST }}
+  NODE_SSH_USER: ${{ secrets.NODE_SSH_USER }}
+  NODE_SSH_KEY: ${{ secrets.NODE_SSH_KEY }}
 
 jobs:
   resize:
@@ -45,7 +61,10 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
         run: |
           set -euo pipefail
-          ARGS=(--size "${{ inputs.size }}")
+          SIZE_RAW="${{ inputs.size }}"
+          SIZE="${SIZE_RAW%% —*}"
+          echo "Target size slug: ${SIZE}"
+          ARGS=(--size "${SIZE}")
           if [ "${{ inputs.trigger_deploy }}" != "true" ]; then
             ARGS+=(--no-deploy)
           fi

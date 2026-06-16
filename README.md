@@ -156,7 +156,7 @@ bun run generate-compose
 
 1. Merge and deploy orchestrator changes while the droplet is still at its current size.
 2. Verify wake/stop: visit an on-demand app (e.g. `https://www.chrisvouga.dev`), then check `https://orchestrator.chrisvouga.dev/status`.
-3. Run **Resize node** workflow with target `s-2vcpu-4gb` (~5–10 min downtime).
+3. Run **Resize node** workflow — pick a size from the dropdown (~5–10 min downtime; default `s-2vcpu-4gb` ~$24/mo).
 4. Confirm vault health; spot-check 2–3 on-demand apps.
 
 ### Vault down (504) — recovery
