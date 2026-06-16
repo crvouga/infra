@@ -43,10 +43,6 @@ pull_service() {
   docker compose pull "${svc}"
 }
 
-compose_services() {
-  docker compose config --services
-}
-
 always_on_services() {
   awk '
     function flush_runtime() {
@@ -71,38 +67,42 @@ always_on_services() {
 }
 
 deploy_all_services() {
-  local pull_failed=()
+  local always_on_failed=()
   local svc
 
-  echo "==> Pull all services (IMAGE_TAG=${IMAGE_TAG})"
+  echo "==> Pull always-on services (IMAGE_TAG=${IMAGE_TAG})"
+  local pull_targets=(traefik)
   while IFS= read -r svc; do
     [[ -z "${svc}" ]] && continue
+    [[ "${svc}" == "traefik" ]] && continue
+    pull_targets+=("${svc}")
+  done < <(always_on_services)
+
+  for svc in "${pull_targets[@]}"; do
     echo "---- pull ${svc}"
     if ! pull_service "${svc}"; then
-      pull_failed+=("${svc}")
+      always_on_failed+=("${svc}")
       echo "WARN: pull failed for ${svc}" >&2
     fi
-  done < <(compose_services)
+  done
 
   echo "==> Build service-orchestrator"
   docker compose build service-orchestrator
 
   echo "==> Up always-on services"
-  local up_services=(traefik)
-  while IFS= read -r svc; do
-    [[ -z "${svc}" ]] && continue
-    [[ "${svc}" == "traefik" ]] && continue
-    if [[ " ${pull_failed[*]:-} " == *" ${svc} "* ]]; then
+  local up_services=()
+  for svc in "${pull_targets[@]}"; do
+    if [[ " ${always_on_failed[*]:-} " == *" ${svc} "* ]]; then
       echo "---- skip ${svc} (pull failed)"
       continue
     fi
     up_services+=("${svc}")
-  done < <(always_on_services)
+  done
 
   docker compose up -d "${up_services[@]}"
 
-  if [[ ${#pull_failed[@]} -gt 0 ]]; then
-    echo "ERROR: failed to pull: ${pull_failed[*]}" >&2
+  if [[ ${#always_on_failed[@]} -gt 0 ]]; then
+    echo "ERROR: failed to pull always-on service(s): ${always_on_failed[*]}" >&2
     echo "       publish the image and ensure the ghcr package is public" >&2
     exit 1
   fi

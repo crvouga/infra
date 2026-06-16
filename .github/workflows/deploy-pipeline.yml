@@ -110,7 +110,7 @@ jobs:
           host: ${{ env.NODE_SSH_HOST }}
           username: ${{ env.NODE_SSH_USER }}
           key: ${{ env.NODE_SSH_KEY }}
-          source: "docker-compose.yml,traefik,services.yaml,scripts/bootstrap-node.sh,scripts/deploy.sh,scripts/start-stack.sh,apps/service-orchestrator,dozzle"
+          source: "docker-compose.yml,traefik,services.yaml,lib,package.json,bun.lock,scripts/bootstrap-node.sh,scripts/deploy.sh,scripts/start-stack.sh,apps/service-orchestrator,dozzle"
           target: ${{ env.DEPLOY_DIR }}
           strip_components: 0
           overwrite: true
