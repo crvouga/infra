@@ -2,8 +2,8 @@
 /**
  * Mint a Vault write token and store it as the VAULT_TOKEN GitHub repo secret.
  *
- * OIDC (github-actions role) is read-only (ci-read). Setup / Provision node need
- * patch access to write NODE_SSH_* into secret/data/personal/prd.
+ * OIDC (github-actions role) is read-only (ci-read). This script mints a write token
+ * for CI operations that need patch access to secret/data/personal/prd.
  *
  * Prerequisites:
  *   - vault CLI authenticated with admin (or policy write + token create)
@@ -177,11 +177,7 @@ async function main(): Promise<void> {
   await verifyPatch(args.vaultAddr, token, args.dryRun);
   await setGithubSecret(args.repo, token, args.dryRun);
 
-  console.log("");
-  console.log("Done. Re-run Setup or Provision node — provision steps use secrets.VAULT_TOKEN for writes.");
-  if (!args.dryRun) {
-    console.log(`Token period: ${args.tokenPeriod} (re-run this script before expiry to rotate).`);
-  }
+  console.log("Done. CI uses secrets.VAULT_TOKEN for Vault API writes when OIDC is unavailable.");
 }
 
 main().catch((err) => {

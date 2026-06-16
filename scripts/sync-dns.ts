@@ -1,24 +1,21 @@
 #!/usr/bin/env bun
 /**
- * Reconcile Cloudflare DNS for the single-node stack.
+ * Reconcile Cloudflare DNS for Fly.io apps.
  *
- * Ensures:
- *   origin.<zone>  A      → NODE_SSH_HOST (droplet IP)
- *   <hostname>     CNAME  → origin.<zone>  (proxied=true by default)
- *
- * Prunes orphan CNAMEs pointing at legacy hosting suffixes.
+ * Per public hostname: CNAME → crvouga-{id}.fly.dev (proxied).
  *
  * Usage:
  *   bun run scripts/sync-dns.ts
  *   bun run scripts/sync-dns.ts --apply
  *   bun run scripts/sync-dns.ts --id pickflix --apply
  */
-import { NODE_SSH_VAULT_KEYS } from "../lib/node-ssh.js";
 import { CloudflareApi, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
 import {
   allDnsTargets,
+  flyAppHostname,
   loadServicesConfig,
   type DnsTarget,
+  type ServicesConfig,
 } from "../lib/services.js";
 
 type Args = {
@@ -52,24 +49,14 @@ function parseArgs(argv: readonly string[]): Args {
   return { ids: ids.filter(Boolean), apply, proxied, pruneOrphans };
 }
 
-function nodeIp(): string {
-  const ip = process.env[NODE_SSH_VAULT_KEYS.host]?.trim();
-  if (!ip) {
-    throw new Error(
-      `${NODE_SSH_VAULT_KEYS.host} is required (droplet IP for origin A record).`,
-    );
-  }
-  return ip;
-}
-
-function servicesFromArgs(config: ReturnType<typeof loadServicesConfig>, args: Args): readonly DnsTarget[] {
+function servicesFromArgs(config: ServicesConfig, args: Args): readonly DnsTarget[] {
   if (args.ids.length === 0) return allDnsTargets(config);
   const all = allDnsTargets(config);
   const out: DnsTarget[] = [];
   for (const id of args.ids) {
     const s = all.find((x) => x.id === id);
     if (!s) {
-      console.error(`No service with id "${id}"`);
+      console.error(`No public service with id "${id}"`);
       process.exit(1);
     }
     out.push(s);
@@ -77,16 +64,18 @@ function servicesFromArgs(config: ReturnType<typeof loadServicesConfig>, args: A
   return out;
 }
 
+function flyCnameTarget(config: ServicesConfig, id: string): string {
+  return flyAppHostname(config, id);
+}
+
 type Action =
-  | { readonly kind: "create"; readonly name: string; readonly type: "A" | "CNAME"; readonly content: string }
-  | { readonly kind: "update"; readonly name: string; readonly type: "A" | "CNAME"; readonly content: string; readonly recordId: string; readonly reason: string }
+  | { readonly kind: "create"; readonly name: string; readonly type: "CNAME"; readonly content: string }
+  | { readonly kind: "update"; readonly name: string; readonly type: "CNAME"; readonly content: string; readonly recordId: string; readonly reason: string }
   | { readonly kind: "delete"; readonly name: string; readonly recordId: string; readonly reason: string }
   | { readonly kind: "ok"; readonly name: string };
 
-/** Legacy CNAME target suffix from prior hosting — pruned when no longer in services.yaml. */
-const LEGACY_ORPHAN_SUFFIX = ".fly.dev";
-/** Origin serves HTTP :80 only — Cloudflare must use Flexible, not Full. */
-const DESIRED_SSL_MODE = "flexible";
+/** Fly terminates TLS — Cloudflare should use Full (strict). */
+const DESIRED_SSL_MODE = "strict";
 
 async function reconcileSslMode(
   cf: CloudflareApi,
@@ -110,7 +99,7 @@ async function reconcileSslMode(
 
 async function planActions(
   records: readonly CloudflareDnsRecord[],
-  config: ReturnType<typeof loadServicesConfig>,
+  config: ServicesConfig,
   services: readonly DnsTarget[],
   args: Args,
 ): Promise<readonly Action[]> {
@@ -123,35 +112,10 @@ async function planActions(
 
   const actions: Action[] = [];
   const desiredNames = new Set<string>();
-  const origin = config.origin_hostname;
-  const originTarget = nodeIp();
-
-  desiredNames.add(origin);
-  const originRecords = byName.get(origin) ?? [];
-  const originA = originRecords.filter((r) => r.type === "A");
-  if (originA.length === 0) {
-    actions.push({ kind: "create", name: origin, type: "A", content: originTarget });
-  } else {
-    const [primary, ...extra] = originA;
-    for (const e of extra) {
-      actions.push({ kind: "delete", name: e.name, recordId: e.id, reason: "duplicate origin A" });
-    }
-    if (primary!.content !== originTarget || primary!.proxied !== args.proxied) {
-      actions.push({
-        kind: "update",
-        name: origin,
-        type: "A",
-        content: originTarget,
-        recordId: primary!.id,
-        reason: `content/proxied drift`,
-      });
-    } else {
-      actions.push({ kind: "ok", name: origin });
-    }
-  }
 
   for (const service of services) {
     desiredNames.add(service.hostname);
+    const target = flyCnameTarget(config, service.id);
     const existing = byName.get(service.hostname) ?? [];
     const cnames = existing.filter((r) => r.type === "CNAME");
     const others = existing.filter((r) => r.type !== "CNAME");
@@ -166,7 +130,7 @@ async function planActions(
     }
 
     if (cnames.length === 0) {
-      actions.push({ kind: "create", name: service.hostname, type: "CNAME", content: origin });
+      actions.push({ kind: "create", name: service.hostname, type: "CNAME", content: target });
       continue;
     }
 
@@ -175,14 +139,14 @@ async function planActions(
       actions.push({ kind: "delete", name: e.name, recordId: e.id, reason: "duplicate CNAME" });
     }
 
-    if (primary!.content !== origin || primary!.proxied !== args.proxied) {
+    if (primary!.content !== target || primary!.proxied !== args.proxied) {
       actions.push({
         kind: "update",
         name: service.hostname,
         type: "CNAME",
-        content: origin,
+        content: target,
         recordId: primary!.id,
-        reason: `content/proxied drift`,
+        reason: "content/proxied drift",
       });
     } else {
       actions.push({ kind: "ok", name: service.hostname });
@@ -190,16 +154,25 @@ async function planActions(
   }
 
   if (args.pruneOrphans) {
+    const originHostname = `origin.${config.zone}`;
     for (const r of records) {
+      if (r.name === originHostname && r.type === "A") {
+        actions.push({
+          kind: "delete",
+          name: r.name,
+          recordId: r.id,
+          reason: "legacy origin A record (DO droplet)",
+        });
+      }
       if (r.type !== "CNAME") continue;
-      if (!r.content.endsWith(LEGACY_ORPHAN_SUFFIX)) continue;
+      if (!r.content.endsWith(".fly.dev")) continue;
       if (desiredNames.has(r.name)) continue;
       if (!r.name.endsWith(config.zone) && !r.name.includes(`.${config.zone}`)) continue;
       actions.push({
         kind: "delete",
         name: r.name,
         recordId: r.id,
-        reason: `legacy orphan CNAME → ${r.content}`,
+        reason: `orphan CNAME → ${r.content}`,
       });
     }
   }
@@ -269,7 +242,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `Sync DNS (${args.apply ? "APPLY" : "DRY-RUN"}) zone=${config.zone} origin=${config.origin_hostname}→${nodeIp()} services=${services.length} proxied=${args.proxied}`,
+    `Sync DNS (${args.apply ? "APPLY" : "DRY-RUN"}) zone=${config.zone} services=${services.length} proxied=${args.proxied}`,
   );
 
   const records = await cf.listDnsRecords(zone.id);

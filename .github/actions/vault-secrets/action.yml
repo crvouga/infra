@@ -4,10 +4,6 @@ inputs:
   vault_addr:
     description: "Vault API URL (from services.yaml zone)"
     required: true
-  allow_missing_node_ssh:
-    description: "Skip loading NODE_SSH_* (Setup / Provision node — provision writes them)"
-    required: false
-    default: "false"
 outputs:
   vault_available:
     description: "true when OIDC auth to Vault succeeded"
@@ -31,7 +27,7 @@ runs:
           secret/data/personal/prd TWILIO_ACCOUNT_SID | TWILIO_ACCOUNT_SID ;
           secret/data/personal/prd TWILIO_AUTH_TOKEN | TWILIO_AUTH_TOKEN ;
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
-          secret/data/personal/prd DIGITALOCEAN_TOKEN | DIGITALOCEAN_TOKEN ;
+          secret/data/personal/prd FLY_TOKEN | FLY_TOKEN ;
           secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER ;
           secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN ;
           secret/data/personal/prd DATABASE_URL | DATABASE_URL ;
@@ -43,11 +39,6 @@ runs:
           secret/data/personal/prd OPENAI_API_KEY | OPENAI_API_KEY ;
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_ID | NORMALIZER_APP_GOOGLE_CLIENT_ID ;
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_SECRET | NORMALIZER_APP_GOOGLE_CLIENT_SECRET ;
-          secret/data/personal/prd NETDATA_USERNAME | NETDATA_USERNAME ;
-          secret/data/personal/prd NETDATA_PASSWORD | NETDATA_PASSWORD ;
-          secret/data/personal/prd DOZZLE_USERNAME | DOZZLE_USERNAME ;
-          secret/data/personal/prd DOZZLE_PASSWORD | DOZZLE_PASSWORD ;
-          secret/data/personal/prd DOZZLE_EMAIL | DOZZLE_EMAIL ;
 
     - name: Wait before Vault retry
       if: steps.vault_core.outcome == 'failure'
@@ -71,7 +62,7 @@ runs:
           secret/data/personal/prd TWILIO_ACCOUNT_SID | TWILIO_ACCOUNT_SID ;
           secret/data/personal/prd TWILIO_AUTH_TOKEN | TWILIO_AUTH_TOKEN ;
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
-          secret/data/personal/prd DIGITALOCEAN_TOKEN | DIGITALOCEAN_TOKEN ;
+          secret/data/personal/prd FLY_TOKEN | FLY_TOKEN ;
           secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER ;
           secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN ;
           secret/data/personal/prd DATABASE_URL | DATABASE_URL ;
@@ -83,28 +74,6 @@ runs:
           secret/data/personal/prd OPENAI_API_KEY | OPENAI_API_KEY ;
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_ID | NORMALIZER_APP_GOOGLE_CLIENT_ID ;
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_SECRET | NORMALIZER_APP_GOOGLE_CLIENT_SECRET ;
-          secret/data/personal/prd NETDATA_USERNAME | NETDATA_USERNAME ;
-          secret/data/personal/prd NETDATA_PASSWORD | NETDATA_PASSWORD ;
-          secret/data/personal/prd DOZZLE_USERNAME | DOZZLE_USERNAME ;
-          secret/data/personal/prd DOZZLE_PASSWORD | DOZZLE_PASSWORD ;
-          secret/data/personal/prd DOZZLE_EMAIL | DOZZLE_EMAIL ;
-
-    - id: vault_ssh
-      if: >-
-        inputs.allow_missing_node_ssh != 'true'
-        && (steps.vault_core.outcome == 'success' || steps.vault_core_retry.outcome == 'success')
-      continue-on-error: true
-      uses: hashicorp/vault-action@v3
-      with:
-        url: ${{ inputs.vault_addr }}
-        method: jwt
-        path: jwt
-        role: github-actions
-        jwtGithubAudience: ${{ inputs.vault_addr }}
-        secrets: |
-          secret/data/personal/prd NODE_SSH_HOST | NODE_SSH_HOST ;
-          secret/data/personal/prd NODE_SSH_USER | NODE_SSH_USER ;
-          secret/data/personal/prd NODE_SSH_KEY | NODE_SSH_KEY
 
     - name: GitHub repository secrets fallback
       if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome == 'failure'

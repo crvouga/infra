@@ -1,18 +1,18 @@
-# Single source of truth for the single-node Docker stack.
+# Single source of truth for Fly.io deployments.
 # Images are built and pushed by each project repo — this repo only consumes them.
 
 zone: chrisvouga.dev
-origin_hostname: origin.chrisvouga.dev
 image_owner: crvouga
+image_prefix: chrisvouga
 default_image_tag: latest
-do_project_name: projects
-droplet_name: origin
 infra_github_repo: crvouga/infra
 skip_rollout_repos:
   - crvouga/portfolio
 
-orchestrator:
-  idle_timeout_minutes: 30
+fly:
+  org: crvouga
+  app_prefix: crvouga
+  region: iad
 
 services:
   - id: portfolio
@@ -197,7 +197,8 @@ services:
     health_check: true
 
   - id: vault
-    runtime: always_on
+    fly:
+      min_machines: 1
     hostname: vault.chrisvouga.dev
     github_repo: crvouga/vault
     source_code_url: https://github.com/crvouga/vault
@@ -223,7 +224,7 @@ services:
     health_path: /health
     env:
       PORT: "8080"
-      VAULT_ADDR: "http://vault:8200"
+      VAULT_ADDR: "https://vault.chrisvouga.dev"
       VAULT_PROJECT: "personal"
       VAULT_CONFIG: "prd"
     depends_on:
@@ -280,6 +281,9 @@ services:
         source: vault
 
   - id: normalizer-worker
+    fly:
+      min_machines: 1
+      public: false
     internal: true
     github_repo: crvouga/normalizer.app
     source_code_url: https://github.com/crvouga/normalizer.app
@@ -312,70 +316,3 @@ aliases:
       - normalizer.app
       - www.normalizer.app
     target: normalizer.chrisvouga.dev
-
-infra_services:
-  - id: service-orchestrator
-    hostname: orchestrator.chrisvouga.dev
-    runtime: always_on
-    build:
-      dockerfile: apps/service-orchestrator/Dockerfile
-      context: .
-    port: 8080
-    health_check: false
-    health_path: /health
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./services.yaml:/config/services.yaml:ro
-      - .:/opt/chrisvouga-dev:ro
-    env:
-      COMPOSE_PROJECT_DIR: /opt/chrisvouga-dev
-      SERVICES_CONFIG_PATH: /config/services.yaml
-      IDLE_TIMEOUT_MINUTES: "30"
-
-  - id: netdata
-    hostname: netdata.chrisvouga.dev
-    image: netdata/netdata:stable
-    port: 19999
-    health_check: false
-    traefik_middlewares:
-      - netdata-auth@file
-    pid: host
-    cap_add:
-      - SYS_PTRACE
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
-    volumes:
-      - netdataconfig:/etc/netdata
-      - netdatalib:/var/lib/netdata
-      - netdatacache:/var/cache/netdata
-      - /etc/passwd:/host/etc/passwd:ro
-      - /etc/group:/host/etc/group:ro
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /etc/os-release:/host/etc/os-release:ro
-      - /var/log:/host/var/log:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    secrets:
-      - name: NETDATA_USERNAME
-        source: vault
-      - name: NETDATA_PASSWORD
-        source: vault
-
-  - id: dozzle
-    hostname: dozzle.chrisvouga.dev
-    image: amir20/dozzle:v8
-    port: 8080
-    health_check: false
-    env:
-      DOZZLE_HOSTNAME: dozzle.chrisvouga.dev
-      DOZZLE_AUTH_PROVIDER: simple
-      DOZZLE_NO_ANALYTICS: "true"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./dozzle/users.yml:/data/users.yml:ro
-    secrets:
-      - name: DOZZLE_USERNAME
-        source: vault
-      - name: DOZZLE_PASSWORD
-        source: vault

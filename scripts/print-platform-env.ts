@@ -7,13 +7,12 @@
  *   eval "$(bun run scripts/print-platform-env.ts --format shell)"
  */
 import {
-  composeProjectName,
-  deployDir,
-  dockerNetworkName,
+  flyAppPrefix,
+  flyOrg,
+  flyRegion,
   imagePrefix,
   infraGithubRepo,
   loadServicesConfig,
-  systemdUnitName,
   vaultAddr,
   zoneSlug,
 } from "../lib/services.js";
@@ -39,14 +38,13 @@ function main(): void {
   const vars: Record<string, string> = {
     ZONE: config.zone,
     ZONE_SLUG: slug,
-    DEPLOY_DIR: deployDir(config),
     VAULT_ADDR: vaultAddr(config),
-    SYSTEMD_UNIT: systemdUnitName(config),
-    DOCKER_NETWORK: dockerNetworkName(config),
-    COMPOSE_PROJECT: composeProjectName(config),
     IMAGE_PREFIX: imagePrefix(config),
     INFRA_GITHUB_REPO: infraGithubRepo(config),
-    STACK_DESCRIPTION: `${config.zone} Docker stack`,
+    FLY_ORG: flyOrg(config),
+    FLY_REGION: flyRegion(config),
+    FLY_APP_PREFIX: flyAppPrefix(config),
+    STACK_DESCRIPTION: `${config.zone} Fly.io stack`,
   };
 
   if (format === "github") {

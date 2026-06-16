@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
-import { NODE_SSH_VAULT_KEYS, type NodeSshCredentials } from "./node-ssh.js";
 import { loadServicesConfig, vaultAddr as vaultAddrFromConfig } from "./services.js";
 
 const VAULT_KV_PATH = "secret/data/personal/prd";
@@ -62,14 +61,6 @@ export async function vaultKvPatch(fields: Record<string, string>): Promise<void
   }
 }
 
-export async function writeNodeSshToVault(creds: NodeSshCredentials): Promise<void> {
-  await vaultKvPatch({
-    [NODE_SSH_VAULT_KEYS.host]: creds.host,
-    [NODE_SSH_VAULT_KEYS.user]: creds.user,
-    [NODE_SSH_VAULT_KEYS.key]: creds.privateKey,
-  });
-}
-
 /** Requires an active `vault login` session (uses ~/.vault-token, not VAULT_TOKEN). */
 export async function requireVaultCliAuth(vaultAddr?: string): Promise<void> {
   const addr = resolveVaultAddr(vaultAddr);
@@ -87,6 +78,7 @@ export async function requireVaultCliAuth(vaultAddr?: string): Promise<void> {
 /** Patch KV secrets via the Vault CLI (`vault kv patch`). */
 export async function vaultKvPatchCli(
   fields: Record<string, string>,
+  cliPath = VAULT_KV_CLI_PATH,
   vaultAddr?: string,
 ): Promise<void> {
   await requireVaultCliAuth(vaultAddr);
@@ -95,12 +87,12 @@ export async function vaultKvPatchCli(
   const file = join(dir, "patch.json");
   try {
     writeFileSync(file, JSON.stringify(fields));
-    const result = await $`vault kv patch ${VAULT_KV_CLI_PATH} @${file}`
+    const result = await $`vault kv patch ${cliPath} @${file}`
       .env({ ...process.env, VAULT_ADDR: addr })
       .nothrow();
     if (result.exitCode !== 0) {
       const detail = result.stderr.toString().trim() || result.stdout.toString().trim();
-      throw new Error(`vault kv patch ${VAULT_KV_CLI_PATH} failed: ${detail}`);
+      throw new Error(`vault kv patch ${cliPath} failed: ${detail}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -125,9 +117,30 @@ export async function vaultKvGetCli(vaultAddr?: string): Promise<Record<string, 
   return body.data?.data ?? {};
 }
 
+export async function vaultKvDeleteKeysApi(
+  keys: readonly string[],
+  kvPath = VAULT_KV_PATH,
+): Promise<void> {
+  const nulls = Object.fromEntries(keys.map((k) => [k, null]));
+  const addr = resolveVaultAddr();
+  const res = await fetch(`${addr}/v1/${kvPath}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${vaultToken()}`,
+      "Content-Type": "application/merge-patch+json",
+    },
+    body: JSON.stringify({ data: nulls }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Vault PATCH ${kvPath} (delete keys) failed (${res.status}): ${text}`);
+  }
+}
+
 /** Delete specific keys from KV via CLI (merge-patch null values). */
 export async function vaultKvDeleteKeysCli(
   keys: readonly string[],
+  cliPath = VAULT_KV_CLI_PATH,
   vaultAddr?: string,
 ): Promise<void> {
   const nulls = Object.fromEntries(keys.map((k) => [k, null]));
@@ -137,7 +150,7 @@ export async function vaultKvDeleteKeysCli(
   const file = join(dir, "patch.json");
   try {
     writeFileSync(file, JSON.stringify(nulls));
-    const result = await $`vault kv patch ${VAULT_KV_CLI_PATH} @${file}`
+    const result = await $`vault kv patch ${cliPath} @${file}`
       .env({ ...process.env, VAULT_ADDR: addr })
       .nothrow();
     if (result.exitCode !== 0) {

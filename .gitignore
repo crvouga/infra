@@ -2,5 +2,5 @@ node_modules/
 env/
 *.env
 node.env
-docker-compose.override.yml
+.fly-token
 .DS_Store

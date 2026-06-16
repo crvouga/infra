@@ -1,6 +1,0 @@
-http:
-  middlewares:
-    netdata-auth:
-      basicAuth:
-        users:
-          - "admin:$2b$11$Y3Z8ZMKVQ0KjBUHvcp7fue.3wlED9qtye462g/wMDQfdWa967VjGa"

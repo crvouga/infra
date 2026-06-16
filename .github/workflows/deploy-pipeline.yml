@@ -1,8 +1,8 @@
 name: Deploy Pipeline
 
-# Single-node Docker stack — fully automated via GitHub Actions.
+# Fly.io stack — fully automated via GitHub Actions.
 #
-#   prepare → bootstrap-node → dns-sync → secrets-sync → make-ghcr-public → deploy → health-check
+#   prepare → dns-sync → fly-secrets → make-ghcr-public → deploy → vault-unseal → health-check
 #
 # Triggers:
 #   - push to main
@@ -46,8 +46,6 @@ permissions:
   contents: read
   packages: write
 
-# GitHub repo secrets used when Vault OIDC is unavailable (504). Keep NODE_SSH_* and
-# GITHUB_TOKEN_SUPER in repo secrets for recovery — see recover-stack workflow.
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -55,9 +53,9 @@ env:
   TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
   TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
   TWILIO_SERVICE_SID: ${{ secrets.TWILIO_SERVICE_SID }}
-  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
   GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
   VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+  FLY_TOKEN: ${{ secrets.FLY_TOKEN }}
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
   S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
   S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
@@ -67,14 +65,6 @@ env:
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   NORMALIZER_APP_GOOGLE_CLIENT_ID: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_ID }}
   NORMALIZER_APP_GOOGLE_CLIENT_SECRET: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_SECRET }}
-  NETDATA_USERNAME: ${{ secrets.NETDATA_USERNAME }}
-  NETDATA_PASSWORD: ${{ secrets.NETDATA_PASSWORD }}
-  DOZZLE_USERNAME: ${{ secrets.DOZZLE_USERNAME }}
-  DOZZLE_PASSWORD: ${{ secrets.DOZZLE_PASSWORD }}
-  DOZZLE_EMAIL: ${{ secrets.DOZZLE_EMAIL }}
-  NODE_SSH_HOST: ${{ secrets.NODE_SSH_HOST }}
-  NODE_SSH_USER: ${{ secrets.NODE_SSH_USER }}
-  NODE_SSH_KEY: ${{ secrets.NODE_SSH_KEY }}
   SERVICE_ID: ${{ github.event.client_payload.id || inputs.service_id || '' }}
   IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'latest' }}
 
@@ -90,7 +80,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun run generate-compose --check
+      - run: bun run generate-fly --check
       - id: resolve
         run: |
           set -euo pipefail
@@ -119,44 +109,6 @@ jobs:
       - run: bun run make-ghcr-public
         env:
           GH_TOKEN: ${{ env.GITHUB_TOKEN_SUPER }}
-
-  bootstrap-node:
-    runs-on: ubuntu-latest
-    needs: prepare
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
-      - uses: ./.github/actions/vault-secrets
-        with:
-          vault_addr: ${{ env.VAULT_ADDR }}
-
-      - name: Rsync stack files to node
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ env.NODE_SSH_HOST }}
-          username: ${{ env.NODE_SSH_USER }}
-          key: ${{ env.NODE_SSH_KEY }}
-          source: "docker-compose.yml,traefik,services.yaml,lib,package.json,bun.lock,scripts/bootstrap-node.sh,scripts/deploy.sh,scripts/start-stack.sh,scripts/ghcr-login.sh,apps/service-orchestrator,dozzle"
-          target: ${{ env.DEPLOY_DIR }}
-          strip_components: 0
-          overwrite: true
-
-      - name: Bootstrap node
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ env.NODE_SSH_HOST }}
-          username: ${{ env.NODE_SSH_USER }}
-          key: ${{ env.NODE_SSH_KEY }}
-          script_stop: true
-          script: |
-            set -euo pipefail
-            chmod +x ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
-            chmod +x ${{ env.DEPLOY_DIR }}/scripts/deploy.sh
-            chmod +x ${{ env.DEPLOY_DIR }}/scripts/ghcr-login.sh
-            chmod +x ${{ env.DEPLOY_DIR }}/scripts/start-stack.sh
-            DEPLOY_DIR=${{ env.DEPLOY_DIR }} SYSTEMD_UNIT=${{ env.SYSTEMD_UNIT }} STACK_DESCRIPTION='${{ env.STACK_DESCRIPTION }}' ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
 
   dns-sync:
     runs-on: ubuntu-latest
@@ -196,9 +148,9 @@ jobs:
           if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
           bun run sync-aliases "${ARGS[@]}"
 
-  secrets-sync:
+  fly-secrets:
     runs-on: ubuntu-latest
-    needs: [prepare, bootstrap-node]
+    needs: prepare
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -208,12 +160,18 @@ jobs:
         id: vault_secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
-      - name: Write service env files
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Sync Fly secrets
         if: steps.vault_secrets.outputs.vault_available == 'true'
         env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
+          if [ -z "${FLY_TOKEN:-}" ]; then
+            echo "ERROR: FLY_TOKEN is required" >&2
+            exit 1
+          fi
           if [ -z "${DB_CONNECTION_URI:-}" ]; then
             echo "ERROR: DB_CONNECTION_URI GitHub secret is not set on this repo" >&2
             exit 1
@@ -223,54 +181,19 @@ jobs:
             echo "${DB_CONNECTION_URI}"
             echo "EOF"
           } >> "$GITHUB_ENV"
-          mkdir -p env
-          ARGS=(--output-dir env)
+          ARGS=()
           if [ -n "${{ needs.prepare.outputs.service_id }}" ]; then
             ARGS+=(--id "${{ needs.prepare.outputs.service_id }}")
           fi
-          bun run sync-secrets "${ARGS[@]}"
-      - name: Skip secrets sync (Vault unavailable)
+          bun run sync-fly-secrets "${ARGS[@]}"
+      - name: Skip Fly secrets (Vault unavailable)
         if: steps.vault_secrets.outputs.vault_available != 'true'
         run: |
-          echo "::warning::Vault unavailable — skipping sync-secrets; reusing env/ already on the node"
-          mkdir -p env
-      - name: Write node runtime .env
-        env:
-          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
-        run: |
-          set -euo pipefail
-          printf '%s\n' "IMAGE_TAG=${IMAGE_TAG}" > node.env
-      - name: Upload env files to node
-        if: steps.vault_secrets.outputs.vault_available == 'true'
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ env.NODE_SSH_HOST }}
-          username: ${{ env.NODE_SSH_USER }}
-          key: ${{ env.NODE_SSH_KEY }}
-          source: "env,node.env,dozzle,traefik/dynamic"
-          target: ${{ env.DEPLOY_DIR }}
-          overwrite: true
-      - name: Place runtime .env on node
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ env.NODE_SSH_HOST }}
-          username: ${{ env.NODE_SSH_USER }}
-          key: ${{ env.NODE_SSH_KEY }}
-          script: |
-            set -euo pipefail
-            mv ${{ env.DEPLOY_DIR }}/node.env ${{ env.DEPLOY_DIR }}/.env
-            mkdir -p ${{ env.DEPLOY_DIR }}/env
-            mkdir -p ${{ env.DEPLOY_DIR }}/dozzle
-            mkdir -p ${{ env.DEPLOY_DIR }}/traefik/dynamic
+          echo "::warning::Vault unavailable — skipping sync-fly-secrets"
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [prepare, bootstrap-node, dns-sync, secrets-sync, make-ghcr-public]
-    if: >-
-      ${{
-        needs.dns-sync.result == 'success'
-        && needs.secrets-sync.result == 'success'
-      }}
+    needs: [prepare]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -279,24 +202,22 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
-      - name: Deploy stack
-        uses: appleboy/ssh-action@v1.2.0
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy to Fly
         env:
-          GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
-        with:
-          host: ${{ env.NODE_SSH_HOST }}
-          username: ${{ env.NODE_SSH_USER }}
-          key: ${{ env.NODE_SSH_KEY }}
-          script_stop: true
-          envs: IMAGE_TAG,GITHUB_TOKEN_SUPER
-          script: |
-            set -euo pipefail
-            export IMAGE_TAG="${{ needs.prepare.outputs.image_tag }}"
-            export GITHUB_TOKEN_SUPER="${GITHUB_TOKEN_SUPER}"
-            cd ${{ env.DEPLOY_DIR }}
-            if [ -f .env ]; then set -a; source .env; set +a; fi
-            SERVICE_ID="${{ needs.prepare.outputs.service_id }}"
-            bash scripts/deploy.sh "${SERVICE_ID}"
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          GH_TOKEN: ${{ env.GITHUB_TOKEN_SUPER || github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FLY_TOKEN:-}" ]; then
+            echo "ERROR: FLY_TOKEN is required" >&2
+            exit 1
+          fi
+          ARGS=(--image-tag "${{ needs.prepare.outputs.image_tag }}" --continue-on-error)
+          if [ -n "${{ needs.prepare.outputs.service_id }}" ]; then
+            ARGS+=(--id "${{ needs.prepare.outputs.service_id }}")
+          fi
+          bun run deploy-fly "${ARGS[@]}"
 
   vault-unseal:
     runs-on: ubuntu-latest
