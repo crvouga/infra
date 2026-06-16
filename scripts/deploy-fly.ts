@@ -184,8 +184,8 @@ async function deployService(
 
   const deployImage = await resolveDeployImage(config, service, ghcrImage, imageTag);
 
-  async function runDeploy(image: string): Promise<{ ok: boolean; detail: string }> {
-    return fly(
+  async function runDeploy(image: string, wait: boolean): Promise<{ ok: boolean; detail: string }> {
+    const args = [
       "deploy",
       "--config",
       configPath,
@@ -196,18 +196,27 @@ async function deployService(
       "--yes",
       "--strategy",
       "rolling",
-      "--wait-timeout",
-      waitTimeout,
       "--ha=false",
-    );
+    ];
+    if (wait) {
+      args.push("--wait-timeout", waitTimeout);
+    } else {
+      args.push("--no-wait");
+    }
+    return fly(...args);
   }
 
-  let deployed = await runDeploy(deployImage);
+  const waitForHealth = flyMinMachines(service) > 0;
+  if (!waitForHealth) {
+    console.log("  Scale-to-zero — deploying without waiting for health checks");
+  }
+
+  let deployed = await runDeploy(deployImage, waitForHealth);
   if (!deployed.ok) {
     if (deployImage === ghcrImage && (await dockerAvailable())) {
       console.log("  Direct GHCR deploy failed — mirroring to Fly registry...");
       const mirrored = await mirrorToFlyRegistry(config, service, ghcrImage, imageTag);
-      deployed = await runDeploy(mirrored);
+      deployed = await runDeploy(mirrored, waitForHealth);
     }
     if (!deployed.ok) throw new Error(deployed.detail);
   }
@@ -267,6 +276,10 @@ async function main(): Promise<void> {
 
   if (failed.length > 0) {
     console.error(`\n${failed.length} service(s) failed: ${failed.join(", ")}`);
+    if (args.continueOnError) {
+      console.warn("Continuing — downstream jobs will run; re-deploy failed ids or check health-check");
+      process.exit(0);
+    }
     process.exit(1);
   }
   console.log("\nDeploy complete");
