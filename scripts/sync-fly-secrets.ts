@@ -55,7 +55,7 @@ async function setFlySecrets(app: string, pairs: Record<string, string>): Promis
   }
 }
 
-function collectSecrets(service: ServiceSpec): Record<string, string> {
+function collectSecrets(service: ServiceSpec): Record<string, string> | null {
   const out: Record<string, string> = {};
   const missing: string[] = [];
 
@@ -69,23 +69,26 @@ function collectSecrets(service: ServiceSpec): Record<string, string> {
   }
 
   if (missing.length > 0) {
-    throw new Error(`${service.id}: missing secrets: ${missing.join(", ")}`);
+    console.warn(`  ${service.id}: skipping — missing secrets: ${missing.join(", ")}`);
+    return null;
   }
 
   return out;
 }
 
-async function syncService(service: ServiceSpec): Promise<void> {
+async function syncService(service: ServiceSpec): Promise<boolean> {
   const secrets = service.secrets ?? [];
   if (secrets.length === 0) {
     console.log(`  ${service.id}: no secrets`);
-    return;
+    return true;
   }
 
   const app = flyAppName(loadServicesConfig(), service.id);
   const pairs = collectSecrets(service);
+  if (pairs == null) return false;
   await setFlySecrets(app, pairs);
   console.log(`  ${service.id}: set ${Object.keys(pairs).length} secret(s) on ${app}`);
+  return true;
 }
 
 async function main(): Promise<void> {
@@ -107,8 +110,13 @@ async function main(): Promise<void> {
         });
 
   console.log(`Sync Fly secrets: ${services.length} service(s)`);
+  const skipped: string[] = [];
   for (const service of services) {
-    await syncService(service);
+    const ok = await syncService(service);
+    if (!ok) skipped.push(service.id);
+  }
+  if (skipped.length > 0) {
+    console.warn(`Skipped ${skipped.length} service(s): ${skipped.join(", ")}`);
   }
 }
 

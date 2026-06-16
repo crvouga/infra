@@ -48,6 +48,7 @@ permissions:
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   TMDB_API_READ_ACCESS_TOKEN: ${{ secrets.TMDB_API_READ_ACCESS_TOKEN }}
   TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
@@ -55,6 +56,7 @@ env:
   TWILIO_SERVICE_SID: ${{ secrets.TWILIO_SERVICE_SID }}
   GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
   VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+  DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
   FLY_TOKEN: ${{ secrets.FLY_TOKEN }}
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
   S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
@@ -162,7 +164,7 @@ jobs:
           vault_addr: ${{ env.VAULT_ADDR }}
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Sync Fly secrets
-        if: steps.vault_secrets.outputs.vault_available == 'true'
+        if: ${{ secrets.FLY_TOKEN != '' }}
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
@@ -172,24 +174,18 @@ jobs:
             echo "ERROR: FLY_TOKEN is required" >&2
             exit 1
           fi
-          if [ -z "${DB_CONNECTION_URI:-}" ]; then
-            echo "ERROR: DB_CONNECTION_URI GitHub secret is not set on this repo" >&2
-            exit 1
+          if [ -n "${DB_CONNECTION_URI:-}" ]; then
+            {
+              echo "DB_CONNECTION_URI<<EOF"
+              echo "${DB_CONNECTION_URI}"
+              echo "EOF"
+            } >> "$GITHUB_ENV"
           fi
-          {
-            echo "DB_CONNECTION_URI<<EOF"
-            echo "${DB_CONNECTION_URI}"
-            echo "EOF"
-          } >> "$GITHUB_ENV"
           ARGS=()
           if [ -n "${{ needs.prepare.outputs.service_id }}" ]; then
             ARGS+=(--id "${{ needs.prepare.outputs.service_id }}")
           fi
           bun run sync-fly-secrets "${ARGS[@]}"
-      - name: Skip Fly secrets (Vault unavailable)
-        if: steps.vault_secrets.outputs.vault_available != 'true'
-        run: |
-          echo "::warning::Vault unavailable — skipping sync-fly-secrets"
 
   deploy:
     runs-on: ubuntu-latest
@@ -232,51 +228,99 @@ jobs:
       }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          repository: crvouga/vault
+          token: ${{ github.token }}
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates lsb-release jq
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+      - name: Unseal OpenBao on Fly
+        env:
+          VAULT_ADDR: https://crvouga-vault.fly.dev
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DB_CONNECTION_URI:-}" ]; then
+            echo "ERROR: DB_CONNECTION_URI GitHub secret is not set on this repo" >&2
+            exit 1
+          fi
+          chmod +x scripts/install-vault-cli.sh scripts/repair-openbao-auth-mounts.sh scripts/unseal.sh
+          ./scripts/install-vault-cli.sh
+          ./scripts/repair-openbao-auth-mounts.sh
+          ./scripts/unseal.sh
+      - name: Smoke test
+        env:
+          VAULT_ADDR: https://crvouga-vault.fly.dev
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/install-vault-cli.sh scripts/fetch-vault-token.sh scripts/smoke-test.sh
+          ./scripts/install-vault-cli.sh
+          export VAULT_TOKEN="$(./scripts/fetch-vault-token.sh)"
+          ./scripts/smoke-test.sh
+
+  dns-sync-post:
+    runs-on: ubuntu-latest
+    needs: [prepare, vault-unseal]
+    if: needs.vault-unseal.result == 'success'
+    steps:
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
       - uses: ./.github/actions/vault-secrets
         with:
-          vault_addr: ${{ env.VAULT_ADDR }}
-      - name: Install gh CLI
-        run: |
-          type -p curl >/dev/null || sudo apt install curl -y
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update
-          sudo apt install gh -y
-      - name: Unseal vault after deploy
+          vault_addr: https://crvouga-vault.fly.dev
+      - name: Reconcile DNS
         env:
-          GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
+          SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
+          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${GITHUB_TOKEN_SUPER}"
-          BEFORE="$(gh run list --workflow=unseal.yml --repo crvouga/vault --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          gh workflow run unseal.yml --repo crvouga/vault --ref main
-          RUN_ID=""
-          for _ in $(seq 1 30); do
-            RUN_ID="$(gh run list --workflow=unseal.yml --repo crvouga/vault --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-            if [ -n "${RUN_ID}" ] && [ "${RUN_ID}" != "${BEFORE}" ]; then
-              break
-            fi
-            sleep 2
-          done
-          if [ -z "${RUN_ID}" ]; then
-            echo "Timed out waiting for vault unseal workflow run"
-            exit 1
-          fi
-          gh run watch "${RUN_ID}" --repo crvouga/vault --exit-status
+          ARGS=()
+          if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
+          if [ -n "${SERVICE_ID}" ]; then ARGS+=(--id "${SERVICE_ID}"); fi
+          bun run sync-dns "${ARGS[@]}"
+      - name: Ensure apex redirect
+        env:
+          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
+          bun run sync-redirects "${ARGS[@]}"
+      - name: Ensure domain aliases
+        env:
+          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
+          bun run sync-aliases "${ARGS[@]}"
 
   health-check:
     runs-on: ubuntu-latest
-    needs: [prepare, deploy, vault-unseal]
+    needs: [prepare, deploy, vault-unseal, dns-sync-post]
     if: >-
       ${{
         needs.deploy.result == 'success'
         && (
           needs.vault-unseal.result == 'success'
           || needs.vault-unseal.result == 'skipped'
+        )
+        && (
+          needs.dns-sync-post.result == 'success'
+          || needs.dns-sync-post.result == 'skipped'
         )
       }}
     steps:

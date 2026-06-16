@@ -8,6 +8,7 @@
  */
 import {
   CloudflareApi,
+  cloudflareCredentialsFromEnv,
   type CloudflareRulesetRule,
 } from "../lib/cloudflare-api.js";
 import { loadServicesConfig, zoneSlug, type AliasSpec } from "../lib/services.js";
@@ -191,6 +192,12 @@ async function syncAlias(
 
 async function main(): Promise<void> {
   const { apply } = parseArgs(process.argv.slice(2));
+  if (!cloudflareCredentialsFromEnv()) {
+    console.warn(
+      "Skipping alias sync — CLOUDFLARE_API_TOKEN (or CF_API_TOKEN) not set",
+    );
+    return;
+  }
   const config = loadServicesConfig();
   const slug = zoneSlug(config.zone);
   const managedComment = `managed by infra/scripts/sync-aliases.ts (${config.zone})`;

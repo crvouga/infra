@@ -9,7 +9,7 @@
  *   bun run scripts/sync-dns.ts --apply
  *   bun run scripts/sync-dns.ts --id pickflix --apply
  */
-import { CloudflareApi, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
+import { CloudflareApi, cloudflareCredentialsFromEnv, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
 import {
   allDnsTargets,
   flyAppHostname,
@@ -231,8 +231,11 @@ async function applyAction(
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (!process.env.CLOUDFLARE_API_TOKEN?.trim() || !process.env.CLOUDFLARE_ACCOUNT_ID?.trim()) {
-    console.warn("Skipping DNS sync — CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set");
+  const cfCreds = cloudflareCredentialsFromEnv();
+  if (!cfCreds) {
+    console.warn(
+      "Skipping DNS sync — CLOUDFLARE_API_TOKEN (or CF_API_TOKEN) not set",
+    );
     return;
   }
   const config = loadServicesConfig();

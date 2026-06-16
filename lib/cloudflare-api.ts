@@ -1,7 +1,18 @@
 /**
  * Typed Cloudflare REST API client.
- * Required env: CLOUDFLARE_API_TOKEN.
+ * Required env: CLOUDFLARE_API_TOKEN (or CF_API_TOKEN).
  */
+
+export function cloudflareCredentialsFromEnv(): {
+  readonly token: string;
+  readonly accountId: string;
+} | null {
+  const token =
+    process.env["CLOUDFLARE_API_TOKEN"]?.trim() || process.env["CF_API_TOKEN"]?.trim() || "";
+  if (!token) return null;
+  const accountId = process.env["CLOUDFLARE_ACCOUNT_ID"]?.trim() || "";
+  return { token, accountId };
+}
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
 
@@ -76,7 +87,12 @@ export class CloudflareApiError extends Error {
 export class CloudflareApi {
   private readonly token: string;
 
-  constructor(token: string = process.env["CLOUDFLARE_API_TOKEN"]?.trim() ?? "") {
+  constructor(
+    token: string =
+      process.env["CLOUDFLARE_API_TOKEN"]?.trim() ||
+      process.env["CF_API_TOKEN"]?.trim() ||
+      "",
+  ) {
     if (!token) {
       throw new Error("CLOUDFLARE_API_TOKEN is required.");
     }

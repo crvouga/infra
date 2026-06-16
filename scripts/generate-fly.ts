@@ -69,6 +69,21 @@ function generateFlyToml(config: ServicesConfig, service: ServiceSpec, tag: stri
     );
   }
 
+  if (!flyIsPublic(service) && flyMinMachines(service) > 0) {
+    lines.push(
+      "",
+      "[[services]]",
+      "  internal_port = 8080",
+      '  protocol = "tcp"',
+      '  auto_stop_machines = "off"',
+      "  auto_start_machines = true",
+      `  min_machines_running = ${minMachines}`,
+      "",
+      "  [[services.ports]]",
+      "    port = 8080",
+    );
+  }
+
   return `${HEADER}${lines.join("\n")}\n`;
 }
 
