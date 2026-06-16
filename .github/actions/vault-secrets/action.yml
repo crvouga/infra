@@ -13,7 +13,7 @@ runs:
   steps:
     - id: vault_core
       continue-on-error: true
-      uses: hashicorp/vault-action@v3
+      uses: hashicorp/vault-action@v4
       with:
         url: ${{ inputs.vault_addr }}
         method: jwt
@@ -48,7 +48,7 @@ runs:
     - id: vault_core_retry
       if: steps.vault_core.outcome == 'failure'
       continue-on-error: true
-      uses: hashicorp/vault-action@v3
+      uses: hashicorp/vault-action@v4
       with:
         url: ${{ inputs.vault_addr }}
         method: jwt
