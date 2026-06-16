@@ -7,7 +7,16 @@
  *   bun run scripts/make-ghcr-public.ts
  *   bun run scripts/make-ghcr-public.ts --dry-run
  */
-import { imagePackageName, loadServicesConfig } from "../lib/services.js";
+import {
+  imagePackageName,
+  isAlwaysOn,
+  loadServicesConfig,
+} from "../lib/services.js";
+
+/** Pre-migration package names still on GHCR. */
+const LEGACY_PACKAGE_NAMES: Readonly<Record<string, readonly string[]>> = {
+  vault: ["chrisvouga-vault"],
+};
 
 function token(): string {
   const t =
@@ -24,7 +33,7 @@ async function setPublic(
   owner: string,
   packageName: string,
   dryRun: boolean,
-): Promise<void> {
+): Promise<boolean> {
   const urls = [
     `https://api.github.com/user/packages/container/${packageName}/visibility`,
     `https://api.github.com/orgs/${owner}/packages/container/${packageName}/visibility`,
@@ -32,7 +41,7 @@ async function setPublic(
 
   if (dryRun) {
     console.log(`[plan] PATCH ${owner}/${packageName} → public`);
-    return;
+    return true;
   }
 
   let lastError = "";
@@ -53,13 +62,14 @@ async function setPublic(
     }
     if (res.ok) {
       console.log(`  public ${owner}/${packageName}`);
-      return;
+      return true;
     }
     const text = await res.text();
     lastError = `HTTP ${res.status} at ${url}: ${text}`;
   }
 
   console.warn(`  skip ${packageName}: ${lastError}`);
+  return false;
 }
 
 async function main(): Promise<void> {
@@ -68,8 +78,23 @@ async function main(): Promise<void> {
   console.log(`Make ghcr packages public (${dryRun ? "DRY-RUN" : "APPLY"})`);
 
   for (const service of config.services) {
-    const packageName = imagePackageName(config, service.id);
-    await setPublic(config.image_owner, packageName, dryRun);
+    const names = new Set<string>([
+      imagePackageName(config, service.id),
+      ...(LEGACY_PACKAGE_NAMES[service.id] ?? []),
+    ]);
+
+    let ok = false;
+    for (const packageName of names) {
+      if (await setPublic(config.image_owner, packageName, dryRun)) {
+        ok = true;
+      }
+    }
+
+    if (!ok && isAlwaysOn(service)) {
+      console.warn(
+        `  WARN: always-on service "${service.id}" — no GHCR package visibility updated (publish image or set public manually)`,
+      );
+    }
   }
 }
 

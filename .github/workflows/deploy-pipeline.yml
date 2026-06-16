@@ -110,7 +110,7 @@ jobs:
           host: ${{ env.NODE_SSH_HOST }}
           username: ${{ env.NODE_SSH_USER }}
           key: ${{ env.NODE_SSH_KEY }}
-          source: "docker-compose.yml,traefik,services.yaml,lib,package.json,bun.lock,scripts/bootstrap-node.sh,scripts/deploy.sh,scripts/start-stack.sh,apps/service-orchestrator,dozzle"
+          source: "docker-compose.yml,traefik,services.yaml,lib,package.json,bun.lock,scripts/bootstrap-node.sh,scripts/deploy.sh,scripts/start-stack.sh,scripts/ghcr-login.sh,apps/service-orchestrator,dozzle"
           target: ${{ env.DEPLOY_DIR }}
           strip_components: 0
           overwrite: true
@@ -126,6 +126,7 @@ jobs:
             set -euo pipefail
             chmod +x ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
             chmod +x ${{ env.DEPLOY_DIR }}/scripts/deploy.sh
+            chmod +x ${{ env.DEPLOY_DIR }}/scripts/ghcr-login.sh
             chmod +x ${{ env.DEPLOY_DIR }}/scripts/start-stack.sh
             DEPLOY_DIR=${{ env.DEPLOY_DIR }} SYSTEMD_UNIT=${{ env.SYSTEMD_UNIT }} STACK_DESCRIPTION='${{ env.STACK_DESCRIPTION }}' ${{ env.DEPLOY_DIR }}/scripts/bootstrap-node.sh
 
@@ -247,15 +248,18 @@ jobs:
           vault_addr: ${{ env.VAULT_ADDR }}
       - name: Deploy stack
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          GITHUB_TOKEN_SUPER: ${{ env.GITHUB_TOKEN_SUPER }}
         with:
           host: ${{ env.NODE_SSH_HOST }}
           username: ${{ env.NODE_SSH_USER }}
           key: ${{ env.NODE_SSH_KEY }}
           script_stop: true
-          envs: IMAGE_TAG
+          envs: IMAGE_TAG,GITHUB_TOKEN_SUPER
           script: |
             set -euo pipefail
             export IMAGE_TAG="${{ needs.prepare.outputs.image_tag }}"
+            export GITHUB_TOKEN_SUPER="${GITHUB_TOKEN_SUPER}"
             cd ${{ env.DEPLOY_DIR }}
             if [ -f .env ]; then set -a; source .env; set +a; fi
             SERVICE_ID="${{ needs.prepare.outputs.service_id }}"

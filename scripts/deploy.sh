@@ -8,6 +8,10 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 cd "${DEPLOY_DIR}"
 
+if [[ -f scripts/ghcr-login.sh ]]; then
+  bash scripts/ghcr-login.sh
+fi
+
 image_owner() {
   awk '/^image_owner:/ { print $2; exit }' services.yaml
 }
@@ -68,6 +72,18 @@ pull_service() {
 
   if docker compose pull "${svc}"; then
     return 0
+  fi
+
+  # Legacy GHCR name before zone-slug prefix migration (vault README: chrisvouga-vault).
+  if [[ "${svc}" == "vault" ]]; then
+    local owner legacy
+    owner="$(image_owner)"
+    legacy="ghcr.io/${owner}/chrisvouga-vault:latest"
+    if docker pull "${legacy}" 2>/dev/null; then
+      docker tag "${legacy}" "${image}"
+      echo "WARN: pull failed for ${svc}, tagged legacy image ${legacy} → ${image}" >&2
+      return 0
+    fi
   fi
 
   if image_exists_locally "${image}"; then
