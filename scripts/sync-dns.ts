@@ -231,6 +231,10 @@ async function applyAction(
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  if (!process.env.CLOUDFLARE_API_TOKEN?.trim() || !process.env.CLOUDFLARE_ACCOUNT_ID?.trim()) {
+    console.warn("Skipping DNS sync — CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set");
+    return;
+  }
   const config = loadServicesConfig();
   const services = servicesFromArgs(config, args);
   const managedComment = `managed by infra/scripts/sync-dns.ts (${config.zone})`;

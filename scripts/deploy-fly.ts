@@ -18,7 +18,6 @@ import {
   findService,
   flyAppName,
   flyIsPublic,
-  flyMinMachines,
   flyOrg,
   imageRepo,
   loadServicesConfig,
@@ -176,6 +175,7 @@ async function deployService(
     throw new Error(`Missing ${configPath} — run: bun run generate-fly`);
   }
   const ghcrImage = `${imageRepo(config, service.id)}:${imageTag}`;
+  const waitTimeout = service.id === "vault" ? "15m" : "8m";
 
   console.log(`\nDeploy ${service.id} → ${app} (${ghcrImage})`);
   await ensureApp(config, service);
@@ -183,45 +183,32 @@ async function deployService(
 
   const deployImage = await resolveDeployImage(config, service, ghcrImage, imageTag);
 
-  const deployed = await fly(
-    "deploy",
-    "--config",
-    configPath,
-    "--image",
-    deployImage,
-    "--app",
-    app,
-    "--yes",
-    "--strategy",
-    "rolling",
-  );
+  async function runDeploy(image: string): Promise<{ ok: boolean; detail: string }> {
+    return fly(
+      "deploy",
+      "--config",
+      configPath,
+      "--image",
+      image,
+      "--app",
+      app,
+      "--yes",
+      "--strategy",
+      "rolling",
+      "--wait-timeout",
+      waitTimeout,
+      "--ha=false",
+    );
+  }
+
+  let deployed = await runDeploy(deployImage);
   if (!deployed.ok) {
     if (deployImage === ghcrImage && (await dockerAvailable())) {
       console.log("  Direct GHCR deploy failed — mirroring to Fly registry...");
       const mirrored = await mirrorToFlyRegistry(config, service, ghcrImage, imageTag);
-      const retry = await fly(
-        "deploy",
-        "--config",
-        configPath,
-        "--image",
-        mirrored,
-        "--app",
-        app,
-        "--yes",
-        "--strategy",
-        "rolling",
-      );
-      if (!retry.ok) throw new Error(retry.detail);
-    } else {
-      throw new Error(deployed.detail);
+      deployed = await runDeploy(mirrored);
     }
-  }
-
-  if (!flyIsPublic(service)) {
-    const count = flyMinMachines(service);
-    console.log(`  Scaling process count → ${count}`);
-    const scaled = await fly("scale", "count", String(count), "--app", app, "--yes");
-    if (!scaled.ok) throw new Error(scaled.detail);
+    if (!deployed.ok) throw new Error(deployed.detail);
   }
 }
 

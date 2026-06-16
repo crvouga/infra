@@ -108,7 +108,7 @@ jobs:
           vault_addr: ${{ env.VAULT_ADDR }}
       - run: bun run make-ghcr-public
         env:
-          GH_TOKEN: ${{ env.GITHUB_TOKEN_SUPER }}
+          GH_TOKEN: ${{ github.token }}
 
   dns-sync:
     runs-on: ubuntu-latest
