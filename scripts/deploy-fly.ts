@@ -18,6 +18,7 @@ import {
   findService,
   flyAppName,
   flyIsPublic,
+  flyMinMachines,
   flyOrg,
   imageRepo,
   loadServicesConfig,
@@ -209,6 +210,24 @@ async function deployService(
       deployed = await runDeploy(mirrored);
     }
     if (!deployed.ok) throw new Error(deployed.detail);
+  }
+
+  if (!flyIsPublic(service) && flyMinMachines(service) > 0) {
+    const list = await $`flyctl machine list --app ${app} --json`
+      .env({ ...process.env })
+      .quiet()
+      .nothrow();
+    if (list.exitCode === 0) {
+      const machines = JSON.parse(list.stdout.toString()) as Array<{
+        id?: string;
+        state?: string;
+      }>;
+      const stopped = machines.filter((m) => m.state === "stopped" && m.id);
+      for (const machine of stopped) {
+        console.log(`  Starting stopped machine ${machine.id}...`);
+        await fly("machine", "start", machine.id!, "--app", app);
+      }
+    }
   }
 }
 
