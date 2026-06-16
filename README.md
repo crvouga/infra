@@ -149,6 +149,7 @@ bun run generate-compose
 | **Deploy Pipeline** | push / dispatch / `workflow_dispatch` | Full deploy |
 | **Provision node** | `workflow_dispatch` | Droplet only |
 | **Resize node** | `workflow_dispatch` | Resize existing droplet → deploy |
+| **Recover stack** | `workflow_dispatch` | Start always-on services when Vault is down (no Vault OIDC) |
 | Per-repo **publish-image** | push to `main` | Build ghcr image → dispatch deploy |
 
 ## Rollout: downsize + on-demand orchestrator
@@ -157,6 +158,16 @@ bun run generate-compose
 2. Verify wake/stop: visit an on-demand app (e.g. `https://www.chrisvouga.dev`), then check `https://orchestrator.chrisvouga.dev/status`.
 3. Run **Resize node** workflow with target `s-2vcpu-4gb` (~5–10 min downtime).
 4. Confirm vault health; spot-check 2–3 on-demand apps.
+
+### Vault down (504) — recovery
+
+If `vault.chrisvouga.dev` returns 504, CI cannot OIDC-auth to Vault (chicken-and-egg when the vault container is stopped). **Recover stack** workflow (no Vault required):
+
+1. Ensure GitHub repo secrets exist: `NODE_SSH_HOST`, `NODE_SSH_USER`, `NODE_SSH_KEY`, `GITHUB_TOKEN_SUPER`
+2. Actions → **Recover stack** → Run workflow (starts traefik + vault + orchestrator, triggers unseal)
+3. When Vault responds, re-run **Deploy Pipeline**
+
+Deploy Pipeline also retries Vault OIDC once and falls back to matching GitHub repo secrets when Vault is down.
 
 **Tradeoffs:** first request to an idle app may take 15–60s (cold start). Full deploy health-checks only `always_on` services; single-service deploys use a 90s cold-start timeout for on-demand apps.
 
