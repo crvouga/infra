@@ -274,6 +274,10 @@ services:
     build_context: proxy
     port: 8080
     health_check: true
+    # "/" 302-redirects non-bot User-Agents to /ui — Fly's health-checker
+    # follows no redirects and treats the 302 as unhealthy, so the machine
+    # never goes healthy and requests that wake it from zero hang forever.
+    health_path: /ui
     env:
       PORT: "8080"
     secrets:
