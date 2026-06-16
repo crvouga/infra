@@ -11,6 +11,7 @@ import {
   deployableServices,
   findService,
   flyAppName,
+  flyMinMachines,
   loadServicesConfig,
   type SecretSpec,
   type ServiceSpec,
@@ -43,11 +44,16 @@ function resolveSecret(spec: SecretSpec): string | null {
   return value || null;
 }
 
-async function setFlySecrets(app: string, pairs: Record<string, string>): Promise<void> {
+async function setFlySecrets(
+  app: string,
+  pairs: Record<string, string>,
+  detach: boolean,
+): Promise<void> {
   const entries = Object.entries(pairs);
   if (entries.length === 0) return;
 
   const args = ["secrets", "set", ...entries.map(([k, v]) => `${k}=${v}`), "--app", app];
+  if (detach) args.push("--detach");
   const result = await $`flyctl ${args}`.env({ ...process.env }).nothrow();
   if (result.exitCode !== 0) {
     const detail = result.stderr.toString().trim() || result.stdout.toString().trim();
@@ -86,7 +92,8 @@ async function syncService(service: ServiceSpec): Promise<boolean> {
   const app = flyAppName(loadServicesConfig(), service.id);
   const pairs = collectSecrets(service);
   if (pairs == null) return false;
-  await setFlySecrets(app, pairs);
+  const detach = flyMinMachines(service) === 0;
+  await setFlySecrets(app, pairs, detach);
   console.log(`  ${service.id}: set ${Object.keys(pairs).length} secret(s) on ${app}`);
   return true;
 }
