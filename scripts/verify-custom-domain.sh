@@ -14,7 +14,7 @@ DNS_RESOLVER="${DNS_RESOLVER:-1.1.1.1}"
 REQUIRE_HEALTHY="${REQUIRE_HEALTHY:-false}"
 REQUIRE_DNS="${REQUIRE_DNS:-true}"
 REQUIRE_CERT="${REQUIRE_CERT:-true}"
-RETRIES="${VERIFY_RETRIES:-10}"
+RETRIES="${VERIFY_RETRIES:-12}"
 RETRY_DELAY_SEC="${VERIFY_RETRY_DELAY_SEC:-10}"
 
 require_cmd() {
@@ -33,32 +33,50 @@ if [ -z "${FLY_APP}" ] && [ -f "${FLY_TOML}" ]; then
 fi
 FLY_APP="${FLY_APP:-crvouga-vault}"
 
-check_dns() {
-  local v4 v6
+check_public_dns() {
+  local v4
   v4="$(dig +short "${HOSTNAME}" A @"${DNS_RESOLVER}" 2>/dev/null | head -n1 || true)"
-  v6="$(dig +short "${HOSTNAME}" AAAA @"${DNS_RESOLVER}" 2>/dev/null | head -n1 || true)"
-  if [ -z "$v4" ] && [ -z "$v6" ]; then
+  if [ -z "$v4" ]; then
     echo "ERROR: ${HOSTNAME} does not resolve on ${DNS_RESOLVER}" >&2
     return 1
   fi
-  echo "==> DNS OK on ${DNS_RESOLVER}: A=${v4:-none} AAAA=${v6:-none}"
+  echo "==> Public DNS OK on ${DNS_RESOLVER}: A=${v4}"
+}
 
+check_cloudflare_cname() {
+  local cf_token existing cname proxied expected
+  cf_token="${CLOUDFLARE_API_TOKEN:-${CF_API_TOKEN:-}}"
+  if [ -z "$cf_token" ]; then
+    echo "==> Skipping Cloudflare API check (no token)"
+    return 0
+  fi
   if ! command -v flyctl >/dev/null 2>&1; then
     return 0
   fi
-  local expected_v4 expected_v6
-  IPS_JSON="$(flyctl ips list --app "${FLY_APP}" --json)"
-  expected_v4="$(echo "$IPS_JSON" | jq -r '.[] | select(.Type=="shared_v4" or .Type=="v4") | .Address' | head -n1)"
-  expected_v6="$(echo "$IPS_JSON" | jq -r '.[] | select(.Type=="v6") | .Address' | head -n1)"
-  if [ -n "$expected_v4" ] && [ "$v4" != "$expected_v4" ]; then
-    echo "ERROR: ${HOSTNAME} A=${v4} does not match Fly ingress ${expected_v4}" >&2
+
+  expected="$(flyctl certs show "${HOSTNAME}" --app "${FLY_APP}" --json | jq -r '.dns_requirements.cname // empty')"
+  if [ -z "$expected" ]; then
+    echo "ERROR: Could not read expected CNAME target from Fly" >&2
     return 1
   fi
-  if [ -n "$expected_v6" ] && [ "$v6" != "$expected_v6" ]; then
-    echo "ERROR: ${HOSTNAME} AAAA=${v6} does not match Fly ingress ${expected_v6}" >&2
+
+  zone_name="${ZONE_NAME:-chrisvouga.dev}"
+  zone_id="$(curl -sS "https://api.cloudflare.com/client/v4/zones?name=${zone_name}" \
+    -H "Authorization: Bearer ${cf_token}" | jq -r '.result[0].id // empty')"
+  if [ -z "$zone_id" ]; then
+    echo "ERROR: Cloudflare zone ${zone_name} not found" >&2
     return 1
   fi
-  echo "==> DNS matches Fly ingress for ${FLY_APP}"
+
+  existing="$(curl -sS "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${HOSTNAME}" \
+    -H "Authorization: Bearer ${cf_token}")"
+  cname="$(echo "$existing" | jq -r '.result[] | select(.type=="CNAME") | .content' | head -n1)"
+  proxied="$(echo "$existing" | jq -r '.result[] | select(.type=="CNAME") | .proxied' | head -n1)"
+  if [ "$cname" != "$expected" ] || [ "$proxied" != "true" ]; then
+    echo "ERROR: Cloudflare CNAME is ${cname:-missing} (proxied=${proxied:-unknown}), expected ${expected} proxied=true" >&2
+    return 1
+  fi
+  echo "==> Cloudflare proxied CNAME OK: ${HOSTNAME} -> ${cname}"
 }
 
 check_cert() {
@@ -83,17 +101,9 @@ check_cert() {
 }
 
 check_https() {
-  local attempt code resolve_args v4
-  v4="$(dig +short "${HOSTNAME}" A @"${DNS_RESOLVER}" 2>/dev/null | head -n1 || true)"
-  resolve_args=()
-  if [ -n "$v4" ]; then
-    resolve_args=(--resolve "${HOSTNAME}:443:${v4}")
-  fi
-
+  local attempt code
   for attempt in $(seq 1 "$RETRIES"); do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 15 \
-      "${resolve_args[@]}" \
-      "${HEALTH_URL}" 2>/dev/null || true)"
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 15 "${HEALTH_URL}" 2>/dev/null || true)"
     code="${code//$'\n'/}"
     if [ -z "$code" ]; then
       code="000"
@@ -121,7 +131,8 @@ check_https() {
 echo "==> Verifying custom domain ${HOSTNAME} (require_healthy=${REQUIRE_HEALTHY})"
 
 if [ "${REQUIRE_DNS}" = "true" ]; then
-  check_dns
+  check_public_dns
+  check_cloudflare_cname
 fi
 
 if [ "${REQUIRE_CERT}" = "true" ]; then

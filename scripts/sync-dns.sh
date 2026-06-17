@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Reconcile Cloudflare DNS for vault.chrisvouga.dev -> Fly ingress (A/AAAA).
-# Matches infra/scripts/sync-dns.ts (DNS-only; Fly terminates TLS).
+# Reconcile Cloudflare DNS for vault.chrisvouga.dev (proxied CNAME → Fly).
+# Cloudflare terminates TLS at the edge; Fly serves the origin cert.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,6 +11,7 @@ ZONE_NAME="${ZONE_NAME:-chrisvouga.dev}"
 RECORD_NAME="${RECORD_NAME:-vault.chrisvouga.dev}"
 FLY_APP="${FLY_APP:-}"
 CF_TOKEN="${CLOUDFLARE_API_TOKEN:-${CF_API_TOKEN:-}}"
+DESIRED_SSL_MODE="${DESIRED_SSL_MODE:-strict}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -50,7 +51,8 @@ cf_request() {
 }
 
 fetch_existing() {
-  cf_request GET "/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}"
+  local name="$1"
+  cf_request GET "/zones/${ZONE_ID}/dns_records?name=${name}"
 }
 
 echo "==> Looking up Cloudflare zone ${ZONE_NAME}..."
@@ -60,15 +62,20 @@ if [ -z "$ZONE_ID" ]; then
   exit 1
 fi
 
-echo "==> Fetching Fly ingress IPs for ${FLY_APP}..."
-IPS_JSON="$(flyctl ips list --app "${FLY_APP}" --json)"
-V4="$(echo "$IPS_JSON" | jq -r '.[] | select(.Type=="shared_v4" or .Type=="v4") | .Address' | head -n1)"
-V6="$(echo "$IPS_JSON" | jq -r '.[] | select(.Type=="v6") | .Address' | head -n1)"
-if [ -z "$V4" ] && [ -z "$V6" ]; then
-  echo "ERROR: No Fly ingress IPs found for ${FLY_APP}" >&2
+echo "==> Fetching Fly DNS requirements for ${RECORD_NAME}..."
+CERT_JSON="$(flyctl certs show "${RECORD_NAME}" --app "${FLY_APP}" --json)"
+CNAME_TARGET="$(echo "$CERT_JSON" | jq -r '.dns_requirements.cname // empty')"
+OWNERSHIP_NAME="$(echo "$CERT_JSON" | jq -r '.dns_requirements.ownership.name // empty')"
+OWNERSHIP_VALUE="$(echo "$CERT_JSON" | jq -r '.dns_requirements.ownership.app_value // empty')"
+
+if [ -z "$CNAME_TARGET" ]; then
+  echo "ERROR: Fly did not return a CNAME target for ${RECORD_NAME}" >&2
   exit 1
 fi
-echo "==> Fly ingress: v4=${V4:-none} v6=${V6:-none}"
+echo "==> Fly CNAME target: ${CNAME_TARGET}"
+if [ -n "$OWNERSHIP_NAME" ] && [ -n "$OWNERSHIP_VALUE" ]; then
+  echo "==> Fly ownership TXT: ${OWNERSHIP_NAME} -> ${OWNERSHIP_VALUE}"
+fi
 
 delete_records() {
   local type="$1"
@@ -77,73 +84,76 @@ delete_records() {
   ids="$(echo "$existing" | jq -r --arg type "$type" '.result[] | select(.type==$type) | .id')"
   while IFS= read -r record_id; do
     [ -z "$record_id" ] && continue
-    echo "==> Deleting stale ${type} record ${RECORD_NAME} (${record_id})"
+    echo "==> Deleting stale ${type} record (${record_id})"
     cf_request DELETE "/zones/${ZONE_ID}/dns_records/${record_id}" | jq -e '.success' >/dev/null
   done <<< "$ids"
 }
 
 reconcile_record() {
-  local type="$1" content="$2" existing="$3"
+  local name="$1" type="$2" content="$3" proxied="$4" existing="$5"
   local record_id current body
   record_id="$(echo "$existing" | jq -r --arg type "$type" '.result[] | select(.type==$type) | .id' | head -n1)"
-  body="$(jq -n --arg name "$RECORD_NAME" --arg type "$type" --arg content "$content" \
-    '{name: $name, type: $type, content: $content, proxied: false, ttl: 1}')"
+  body="$(jq -n --arg name "$name" --arg type "$type" --arg content "$content" --argjson proxied "$proxied" \
+    '{name: $name, type: $type, content: $content, proxied: $proxied, ttl: 1}')"
 
   if [ -n "$record_id" ]; then
     current="$(echo "$existing" | jq -r --arg type "$type" '.result[] | select(.type==$type) | .content' | head -n1)"
-    if [ "$current" = "$content" ]; then
-      echo "==> OK ${type} ${RECORD_NAME} -> ${content}"
+    current_proxied="$(echo "$existing" | jq -r --arg type "$type" '.result[] | select(.type==$type) | .proxied' | head -n1)"
+    if [ "$current" = "$content" ] && [ "$current_proxied" = "$proxied" ]; then
+      echo "==> OK ${type} ${name} -> ${content} (proxied=${proxied})"
       return 0
     fi
-    echo "==> Updating ${type} ${RECORD_NAME} -> ${content}"
+    echo "==> Updating ${type} ${name} -> ${content} (proxied=${proxied})"
     cf_request PUT "/zones/${ZONE_ID}/dns_records/${record_id}" "$body" | jq -e '.success' >/dev/null
   else
-    echo "==> Creating ${type} ${RECORD_NAME} -> ${content}"
+    echo "==> Creating ${type} ${name} -> ${content} (proxied=${proxied})"
     cf_request POST "/zones/${ZONE_ID}/dns_records" "$body" | jq -e '.success' >/dev/null
   fi
 }
 
-EXISTING="$(fetch_existing)"
-echo "==> Reconciling ${RECORD_NAME} -> Fly ingress"
-delete_records CNAME "$EXISTING"
-if [ -n "$V4" ]; then
-  reconcile_record A "$V4" "$EXISTING"
+reconcile_ssl_mode() {
+  local current
+  current="$(cf_request GET "/zones/${ZONE_ID}/settings/ssl" | jq -r '.result.value // empty')"
+  if [ "$current" = "$DESIRED_SSL_MODE" ]; then
+    echo "==> OK Cloudflare SSL/TLS mode=${current}"
+    return 0
+  fi
+  echo "==> Setting Cloudflare SSL/TLS mode: ${current:-unknown} -> ${DESIRED_SSL_MODE}"
+  cf_request PATCH "/zones/${ZONE_ID}/settings/ssl" "{\"value\":\"${DESIRED_SSL_MODE}\"}" | jq -e '.success' >/dev/null
+}
+
+HOST_EXISTING="$(fetch_existing "${RECORD_NAME}")"
+echo "==> Reconciling proxied CNAME ${RECORD_NAME} -> ${CNAME_TARGET}"
+delete_records A "$HOST_EXISTING"
+delete_records AAAA "$HOST_EXISTING"
+reconcile_record "${RECORD_NAME}" CNAME "${CNAME_TARGET}" true "$HOST_EXISTING"
+
+if [ -n "$OWNERSHIP_NAME" ] && [ -n "$OWNERSHIP_VALUE" ]; then
+  OWNERSHIP_EXISTING="$(fetch_existing "${OWNERSHIP_NAME}")"
+  reconcile_record "${OWNERSHIP_NAME}" TXT "${OWNERSHIP_VALUE}" false "$OWNERSHIP_EXISTING"
 fi
-if [ -n "$V6" ]; then
-  reconcile_record AAAA "$V6" "$EXISTING"
-fi
+
+reconcile_ssl_mode
 
 echo "==> Verifying Cloudflare records..."
-EXISTING="$(fetch_existing)"
-if [ -n "$V4" ]; then
-  CF_V4="$(echo "$EXISTING" | jq -r '.result[] | select(.type=="A") | .content' | head -n1)"
-  if [ "$CF_V4" != "$V4" ]; then
-    echo "ERROR: Cloudflare A record is ${CF_V4:-missing}, expected ${V4}" >&2
-    exit 1
-  fi
+HOST_EXISTING="$(fetch_existing "${RECORD_NAME}")"
+CF_CNAME="$(echo "$HOST_EXISTING" | jq -r '.result[] | select(.type=="CNAME") | .content' | head -n1)"
+CF_PROXIED="$(echo "$HOST_EXISTING" | jq -r '.result[] | select(.type=="CNAME") | .proxied' | head -n1)"
+if [ "$CF_CNAME" != "$CNAME_TARGET" ] || [ "$CF_PROXIED" != "true" ]; then
+  echo "ERROR: Cloudflare CNAME is ${CF_CNAME:-missing} (proxied=${CF_PROXIED:-unknown}), expected ${CNAME_TARGET} proxied=true" >&2
+  exit 1
 fi
-if [ -n "$V6" ]; then
-  CF_V6="$(echo "$EXISTING" | jq -r '.result[] | select(.type=="AAAA") | .content' | head -n1)"
-  if [ "$CF_V6" != "$V6" ]; then
-    echo "ERROR: Cloudflare AAAA record is ${CF_V6:-missing}, expected ${V6}" >&2
-    exit 1
-  fi
-fi
-echo "==> Cloudflare records verified"
+echo "==> Cloudflare CNAME verified"
 
-echo "==> Waiting for public DNS propagation..."
+echo "==> Waiting for public DNS propagation (1.1.1.1)..."
 RESOLVED=""
-for attempt in 1 2 3 4 5 6; do
-  if [ -n "$V4" ]; then
-    RESOLVED="$(dig +short "${RECORD_NAME}" A @1.1.1.1 2>/dev/null | head -n1 || true)"
-  elif [ -n "$V6" ]; then
-    RESOLVED="$(dig +short "${RECORD_NAME}" AAAA @1.1.1.1 2>/dev/null | head -n1 || true)"
-  fi
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  RESOLVED="$(dig +short "${RECORD_NAME}" A @1.1.1.1 2>/dev/null | head -n1 || true)"
   if [ -n "$RESOLVED" ]; then
     echo "==> Public DNS resolves ${RECORD_NAME} -> ${RESOLVED}"
     break
   fi
-  echo "  attempt ${attempt}/6 — not visible on 1.1.1.1 yet, waiting 10s..."
+  echo "  attempt ${attempt}/12 — not visible on 1.1.1.1 yet, waiting 10s..."
   sleep 10
 done
 

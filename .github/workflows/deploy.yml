@@ -130,7 +130,7 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          chmod +x scripts/sync-dns.sh
+          chmod +x scripts/sync-dns.sh scripts/verify-custom-domain.sh
           ./scripts/sync-dns.sh
 
       - name: Ensure TLS certificate
@@ -158,10 +158,9 @@ jobs:
       - name: Verify custom domain (pre-unseal)
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_HEALTHY: "false"
-        run: |
-          chmod +x scripts/verify-custom-domain.sh
-          ./scripts/verify-custom-domain.sh
+        run: ./scripts/verify-custom-domain.sh
 
       - name: Unseal OpenBao
         env:
@@ -184,7 +183,6 @@ jobs:
       - name: Health check custom domain
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_HEALTHY: "true"
-        run: |
-          chmod +x scripts/verify-custom-domain.sh
-          ./scripts/verify-custom-domain.sh
+        run: ./scripts/verify-custom-domain.sh
