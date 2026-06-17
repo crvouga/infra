@@ -196,23 +196,6 @@ services:
     port: 80
     health_check: true
 
-  - id: vault
-    fly:
-      min_machines: 1
-    hostname: vault.chrisvouga.dev
-    github_repo: crvouga/vault
-    source_code_url: https://github.com/crvouga/vault
-    dockerfile: ./Dockerfile
-    build_context: .
-    port: 8200
-    health_check: true
-    health_path: /v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200
-    env:
-      BAO_API_ADDR: "https://vault.chrisvouga.dev"
-    secrets:
-      - name: DB_CONNECTION_URI
-        source: github
-
   - id: turborepo
     hostname: turborepo.chrisvouga.dev
     github_repo: crvouga/turborepo-remote-cache

@@ -14,9 +14,7 @@ import {
 } from "../lib/services.js";
 
 /** Pre-migration package names still on GHCR. */
-const LEGACY_PACKAGE_NAMES: Readonly<Record<string, readonly string[]>> = {
-  vault: ["chrisvouga-vault"],
-};
+const LEGACY_PACKAGE_NAMES: Readonly<Record<string, readonly string[]>> = {};
 
 function token(): string {
   const t =

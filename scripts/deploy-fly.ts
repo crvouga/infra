@@ -176,7 +176,7 @@ async function deployService(
     throw new Error(`Missing ${configPath} — run: bun run generate-fly`);
   }
   const ghcrImage = `${imageRepo(config, service.id)}:${imageTag}`;
-  const waitTimeout = service.id === "vault" ? "15m" : "8m";
+  const waitTimeout = "8m";
 
   console.log(`\nDeploy ${service.id} → ${app} (${ghcrImage})`);
   await ensureApp(config, service);
