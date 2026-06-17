@@ -33,8 +33,6 @@ runs:
           secret/data/personal/prd S3_BUCKET | S3_BUCKET ;
           secret/data/personal/prd S3_REGION | S3_REGION ;
           secret/data/personal/prd OPENAI_API_KEY | OPENAI_API_KEY ;
-          secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_ID | NORMALIZER_APP_GOOGLE_CLIENT_ID ;
-          secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_SECRET | NORMALIZER_APP_GOOGLE_CLIENT_SECRET ;
 
     - name: Wait before Vault retry
       if: steps.vault_core.outcome == 'failure'
@@ -67,8 +65,6 @@ runs:
           secret/data/personal/prd S3_BUCKET | S3_BUCKET ;
           secret/data/personal/prd S3_REGION | S3_REGION ;
           secret/data/personal/prd OPENAI_API_KEY | OPENAI_API_KEY ;
-          secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_ID | NORMALIZER_APP_GOOGLE_CLIENT_ID ;
-          secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_SECRET | NORMALIZER_APP_GOOGLE_CLIENT_SECRET ;
 
     - name: Require Vault OIDC
       if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome != 'success'

@@ -10,7 +10,7 @@ Platform paths, app names, and GHCR prefixes are derived from `services.yaml` â€
 
 **Scale to zero (default):** most services stop when idle and wake on first HTTP request. Run `bun run scale-to-zero` to stop any machines that are still running.
 
-**Always on (`fly.min_machines: 1`):** `normalizer-worker` only (in this repo). `vault` is always on in the separate `vault` repo.
+**Always on (`fly.min_machines: 1`):** `vault` only (in the separate `vault` repo).
 
 ## Architecture
 
@@ -140,7 +140,7 @@ SSL mode is set to **Full (strict)** (Fly terminates TLS).
 
 After Fly is healthy:
 
-1. Verify vault unseal + `normalizer-worker` + spot-check a scale-to-zero app
+1. Verify vault unseal + spot-check a scale-to-zero app
 2. Run **Destroy DigitalOcean** workflow â€” type `destroy-origin` to confirm
 3. Follow-up: delete `destroy-digitalocean.yml`, `destroy-digitalocean.ts`, and `DIGITALOCEAN_TOKEN` references
 
