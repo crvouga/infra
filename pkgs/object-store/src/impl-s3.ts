@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { AwsClient } from 'aws4fetch';
 
 import { ObjectStoreWithPrefix } from './impl-with-prefix';

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-function bytesToBase64(bytes: Uint8Array): string {
+function contentMd5Base64Node(bytes: Uint8Array): string {
   return createHash('md5').update(bytes).digest('base64');
 }
 
@@ -14,7 +14,7 @@ function contentMd5Base64(bytes: Uint8Array): string {
   if (typeof Bun !== 'undefined' && 'CryptoHasher' in Bun) {
     return contentMd5Base64Bun(bytes);
   }
-  return bytesToBase64(bytes);
+  return contentMd5Base64Node(bytes);
 }
 
 /**
