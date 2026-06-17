@@ -12,6 +12,7 @@
     "health-check": "bun run scripts/health-check-urls.ts",
     "generate-fly": "bun run scripts/generate-fly.ts",
     "deploy-fly": "bun run scripts/deploy-fly.ts",
+    "scale-to-zero": "bun run scripts/scale-to-zero.ts",
     "make-ghcr-public": "bun run scripts/make-ghcr-public.ts",
     "seed-fly-token": "bun run scripts/seed-fly-token.ts",
     "seed-vault-github-secret": "bun run scripts/seed-vault-github-secret.ts",

@@ -156,7 +156,7 @@ async function main(): Promise<void> {
     writeFlyTokenCache(token);
     console.log(`Wrote ${flyTokenCachePath()} (mode 600, gitignored)`);
     console.log("Local deploy: bun run deploy-fly (reads .fly-token automatically)");
-    console.log("CI fallback: gh secret set FLY_TOKEN --body \"$(cat .fly-token)\"");
+    console.log("Store in Vault for CI: bun run seed-fly-token --vault");
   }
 
   if (args.vault) {

@@ -4,6 +4,8 @@ name: Deploy Pipeline
 #
 #   prepare → dns-sync → make-ghcr-public → fly-deploy (matrix) → health-check
 #
+# Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
+#
 # Triggers:
 #   - push to main
 #   - repository_dispatch (deploy-service)
@@ -87,26 +89,6 @@ jobs:
   make-ghcr-public:
     runs-on: ubuntu-latest
     needs: prepare
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TMDB_API_READ_ACCESS_TOKEN: ${{ secrets.TMDB_API_READ_ACCESS_TOKEN }}
-      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-      TWILIO_SERVICE_SID: ${{ secrets.TWILIO_SERVICE_SID }}
-      FLY_TOKEN: ${{ secrets.FLY_TOKEN }}
-      GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
-      VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-      S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
-      S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      S3_REGION: ${{ secrets.S3_REGION }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      NORMALIZER_APP_GOOGLE_CLIENT_ID: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_ID }}
-      NORMALIZER_APP_GOOGLE_CLIENT_SECRET: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -122,26 +104,6 @@ jobs:
   dns-sync:
     runs-on: ubuntu-latest
     needs: prepare
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TMDB_API_READ_ACCESS_TOKEN: ${{ secrets.TMDB_API_READ_ACCESS_TOKEN }}
-      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-      TWILIO_SERVICE_SID: ${{ secrets.TWILIO_SERVICE_SID }}
-      FLY_TOKEN: ${{ secrets.FLY_TOKEN }}
-      GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
-      VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-      S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
-      S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      S3_REGION: ${{ secrets.S3_REGION }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      NORMALIZER_APP_GOOGLE_CLIENT_ID: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_ID }}
-      NORMALIZER_APP_GOOGLE_CLIENT_SECRET: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -183,26 +145,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: prepare
     continue-on-error: true
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TMDB_API_READ_ACCESS_TOKEN: ${{ secrets.TMDB_API_READ_ACCESS_TOKEN }}
-      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-      TWILIO_SERVICE_SID: ${{ secrets.TWILIO_SERVICE_SID }}
-      FLY_TOKEN: ${{ secrets.FLY_TOKEN }}
-      GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
-      VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-      S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
-      S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      S3_REGION: ${{ secrets.S3_REGION }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      NORMALIZER_APP_GOOGLE_CLIENT_ID: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_ID }}
-      NORMALIZER_APP_GOOGLE_CLIENT_SECRET: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_SECRET }}
     strategy:
       fail-fast: false
       matrix:

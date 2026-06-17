@@ -177,7 +177,7 @@ async function main(): Promise<void> {
   await verifyPatch(args.vaultAddr, token, args.dryRun);
   await setGithubSecret(args.repo, token, args.dryRun);
 
-  console.log("Done. CI uses secrets.VAULT_TOKEN for Vault API writes when OIDC is unavailable.");
+  console.log("Done. Deploy pipeline loads secrets from Vault via OIDC; this GitHub secret is optional.");
 }
 
 main().catch((err) => {

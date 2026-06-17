@@ -8,9 +8,9 @@ Cloudflare terminates TLS at the edge (proxied DNS, Full strict). Fly apps run i
 
 Platform paths, app names, and GHCR prefixes are derived from `services.yaml` — not hardcoded in scripts.
 
-**Scale to zero (default):** most services stop when idle and wake on first HTTP request.
+**Scale to zero (default):** most services stop when idle and wake on first HTTP request. Run `bun run scale-to-zero` to stop any machines that are still running.
 
-**Always on (`fly.min_machines: 1`):** `vault`, `normalizer-worker`
+**Always on (`fly.min_machines: 1`):** `normalizer-worker` only (in this repo). `vault` is always on in the separate `vault` repo.
 
 ## Architecture
 

@@ -1,13 +1,9 @@
 name: Vault secrets (OIDC)
-description: Authenticate to OpenBao via GitHub OIDC and export pipeline secrets; retry on 504 and fall back to GitHub repo secrets when Vault is down.
+description: Authenticate to OpenBao via GitHub OIDC and export pipeline secrets from Vault.
 inputs:
   vault_addr:
     description: "Vault API URL (from services.yaml zone)"
     required: true
-outputs:
-  vault_available:
-    description: "true when OIDC auth to Vault succeeded"
-    value: ${{ steps.mark.outputs.vault_available }}
 runs:
   using: composite
   steps:
@@ -47,7 +43,6 @@ runs:
 
     - id: vault_core_retry
       if: steps.vault_core.outcome == 'failure'
-      continue-on-error: true
       uses: hashicorp/vault-action@v4
       with:
         url: ${{ inputs.vault_addr }}
@@ -75,10 +70,12 @@ runs:
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_ID | NORMALIZER_APP_GOOGLE_CLIENT_ID ;
           secret/data/personal/prd NORMALIZER_APP_GOOGLE_CLIENT_SECRET | NORMALIZER_APP_GOOGLE_CLIENT_SECRET ;
 
-    - name: GitHub repository secrets fallback
-      if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome == 'failure'
+    - name: Require Vault OIDC
+      if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome != 'success'
       shell: bash
-      run: bash "${{ github.action_path }}/fallback.sh"
+      run: |
+        echo "::error::Failed to load secrets from Vault at ${{ inputs.vault_addr }} via OIDC"
+        exit 1
 
     - name: Normalize secret env aliases
       shell: bash
@@ -89,14 +86,4 @@ runs:
             echo "${CLOUDFLARE_API_TOKEN}"
             echo "EOF"
           } >> "${GITHUB_ENV}"
-        fi
-
-    - id: mark
-      shell: bash
-      run: |
-        if [ "${{ steps.vault_core.outcome }}" = "success" ] || [ "${{ steps.vault_core_retry.outcome }}" = "success" ]; then
-          echo "vault_available=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "vault_available=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::Vault OIDC unavailable — pipeline is using GitHub repository secrets fallback"
         fi
