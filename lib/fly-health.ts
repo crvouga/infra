@@ -106,7 +106,7 @@ export async function waitForServiceHealthy(
     } else {
       const detail = http.error ?? `HTTP ${http.status}`;
       console.log(`  ${service.id} not ready: ${detail}`);
-      if (http.fastFail) {
+      if (http.fastFail && alwaysOn) {
         throw new Error(`${service.id} unhealthy: ${detail} (${url})`);
       }
     }

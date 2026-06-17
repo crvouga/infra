@@ -124,7 +124,7 @@ async function checkWithRetries(
 
     const err = http.error ?? `HTTP ${http.status}`;
     console.log(`  ✗ ${service.id} attempt ${attempt}/${max}: ${err}`);
-    if (http.fastFail) return { ok: false, error: err };
+    if (http.fastFail && isAlwaysOn(service)) return { ok: false, error: err };
     if (attempt < max) await sleep(args.retryDelayMs);
     else return { ok: false, error: err };
   }
