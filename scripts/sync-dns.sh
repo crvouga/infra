@@ -113,6 +113,24 @@ if [ -n "$V6" ]; then
   reconcile_record AAAA "$V6" "$EXISTING"
 fi
 
+echo "==> Verifying Cloudflare records..."
+EXISTING="$(fetch_existing)"
+if [ -n "$V4" ]; then
+  CF_V4="$(echo "$EXISTING" | jq -r '.result[] | select(.type=="A") | .content' | head -n1)"
+  if [ "$CF_V4" != "$V4" ]; then
+    echo "ERROR: Cloudflare A record is ${CF_V4:-missing}, expected ${V4}" >&2
+    exit 1
+  fi
+fi
+if [ -n "$V6" ]; then
+  CF_V6="$(echo "$EXISTING" | jq -r '.result[] | select(.type=="AAAA") | .content' | head -n1)"
+  if [ "$CF_V6" != "$V6" ]; then
+    echo "ERROR: Cloudflare AAAA record is ${CF_V6:-missing}, expected ${V6}" >&2
+    exit 1
+  fi
+fi
+echo "==> Cloudflare records verified"
+
 echo "==> Waiting for public DNS propagation..."
 RESOLVED=""
 for attempt in 1 2 3 4 5 6; do

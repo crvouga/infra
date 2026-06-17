@@ -1,7 +1,7 @@
 name: Deploy
 
-# Full pipeline on push to main: migrate -> build image -> Fly deploy -> DNS -> unseal -> smoke.
-# workflow_dispatch with unseal_only skips rebuild/redeploy for out-of-band recovery.
+# Full pipeline on push to main: migrate -> build -> Fly deploy -> DNS -> TLS -> unseal -> smoke -> health.
+# workflow_dispatch with unseal_only skips migrate/build/deploy; still reconciles DNS/TLS and verifies the domain.
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       unseal_only:
-        description: Skip migrate/build/deploy/DNS; only unseal and smoke test
+        description: Skip migrate/build/deploy; still reconcile DNS/TLS and verify vault.chrisvouga.dev
         type: boolean
         default: false
 
@@ -26,6 +26,7 @@ permissions:
 
 env:
   VAULT_ADDR: https://vault.chrisvouga.dev
+  VAULT_HOSTNAME: vault.chrisvouga.dev
 
 jobs:
   deploy:
@@ -37,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y curl ca-certificates lsb-release jq
+          sudo apt-get install -y curl ca-certificates lsb-release jq dnsutils
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc
@@ -46,6 +47,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Run migrations
         if: github.event_name == 'push' || inputs.unseal_only != true
@@ -109,9 +112,6 @@ jobs:
           done
           echo "Package chrisvouga-vault visibility not updated (may not exist yet on first push)"
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-        if: github.event_name == 'push' || inputs.unseal_only != true
-
       - name: Sync Fly secrets
         if: github.event_name == 'push' || inputs.unseal_only != true
         env:
@@ -126,7 +126,6 @@ jobs:
         run: flyctl deploy --config fly.toml --wait-timeout 15m
 
       - name: Reconcile DNS
-        if: github.event_name == 'push' || inputs.unseal_only != true
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -135,7 +134,6 @@ jobs:
           ./scripts/sync-dns.sh
 
       - name: Ensure TLS certificate
-        if: github.event_name == 'push' || inputs.unseal_only != true
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
@@ -143,36 +141,27 @@ jobs:
           flyctl certs add vault.chrisvouga.dev --config fly.toml 2>/dev/null || true
           for attempt in $(seq 1 12); do
             echo "==> Checking TLS certificate (attempt ${attempt}/12)..."
-            CONFIGURED="$(flyctl certs list --config fly.toml --json | jq -r '.[] | select(.hostname=="vault.chrisvouga.dev") | .configured')"
             STATUS="$(flyctl certs list --config fly.toml --json | jq -r '.[] | select(.hostname=="vault.chrisvouga.dev") | .status')"
-            if [ "${CONFIGURED}" = "true" ]; then
-              echo "==> Certificate configured (status=${STATUS})"
+            CONFIGURED="$(flyctl certs list --config fly.toml --json | jq -r '.[] | select(.hostname=="vault.chrisvouga.dev") | .configured')"
+            if [ "${CONFIGURED}" = "true" ] && [ "${STATUS}" = "Ready" ]; then
               flyctl certs check vault.chrisvouga.dev --config fly.toml
+              echo "==> TLS certificate ready"
               exit 0
             fi
             flyctl certs check vault.chrisvouga.dev --config fly.toml || true
             sleep 15
           done
-          echo "ERROR: TLS certificate for vault.chrisvouga.dev is not configured" >&2
+          echo "ERROR: TLS certificate for vault.chrisvouga.dev is not Ready" >&2
           flyctl certs list --config fly.toml
           exit 1
 
-      - name: Verify custom domain
-        if: github.event_name == 'push' || inputs.unseal_only != true
+      - name: Verify custom domain (pre-unseal)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          REQUIRE_HEALTHY: "false"
         run: |
-          set -euo pipefail
-          for attempt in $(seq 1 10); do
-            CODE="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 15 \
-              "https://vault.chrisvouga.dev/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200" || echo "000")"
-            if [ "${CODE}" = "200" ] || [ "${CODE}" = "503" ]; then
-              echo "==> https://vault.chrisvouga.dev reachable (HTTP ${CODE})"
-              exit 0
-            fi
-            echo "  attempt ${attempt}/10 — HTTP ${CODE}, retrying in 10s..."
-            sleep 10
-          done
-          echo "ERROR: https://vault.chrisvouga.dev is not reachable" >&2
-          exit 1
+          chmod +x scripts/verify-custom-domain.sh
+          ./scripts/verify-custom-domain.sh
 
       - name: Unseal OpenBao
         env:
@@ -191,3 +180,11 @@ jobs:
           set -euo pipefail
           export VAULT_TOKEN="$(./scripts/fetch-vault-token.sh)"
           ./scripts/smoke-test.sh
+
+      - name: Health check custom domain
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          REQUIRE_HEALTHY: "true"
+        run: |
+          chmod +x scripts/verify-custom-domain.sh
+          ./scripts/verify-custom-domain.sh
