@@ -7,16 +7,19 @@
 #       branches: [main]
 #   jobs:
 #     publish:
-#       uses: crvouga/chrisvouga.dev/.github/workflows/reusable-publish-image.yml@main
+#       uses: crvouga/infra/.github/workflows/reusable-publish-image.yml@main
 #       permissions:
 #         contents: read
 #         packages: write
+#       secrets:
+#         DEPLOY_DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+#         CALLER_GITHUB_TOKEN: ${{ github.token }}
 #       with:
 #         service_id: portfolio
 #         dockerfile: ./Dockerfile
 #         context: .
-#         image_prefix: chrisvouga-dev
-#         infra_github_repo: crvouga/chrisvouga.dev
+#         image_prefix: chrisvouga
+#         infra_github_repo: crvouga/infra
 
 name: Reusable publish image
 
@@ -75,7 +78,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ inputs.image_owner }}
-          password: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.CALLER_GITHUB_TOKEN }}
+          password: ${{ secrets.CALLER_GITHUB_TOKEN || secrets.DEPLOY_DISPATCH_TOKEN }}
 
       - uses: docker/setup-buildx-action@v4.0.0
 
@@ -93,7 +96,7 @@ jobs:
 
       - name: Make package public
         env:
-          GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.CALLER_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CALLER_GITHUB_TOKEN || secrets.DEPLOY_DISPATCH_TOKEN }}
           PKG: ${{ inputs.image_prefix }}-${{ inputs.service_id }}
           OWNER: ${{ inputs.image_owner }}
         run: |
