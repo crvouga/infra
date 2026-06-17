@@ -56,6 +56,9 @@ on:
       DEPLOY_DISPATCH_TOKEN:
         description: "PAT or GITHUB_TOKEN with repo dispatch to the infra repo."
         required: false
+      CALLER_GITHUB_TOKEN:
+        description: "Caller workflow github.token — required for GHCR push from cross-repo reusable workflows."
+        required: false
 
 permissions:
   contents: read
@@ -72,7 +75,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ inputs.image_owner }}
-          password: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.CALLER_GITHUB_TOKEN }}
 
       - uses: docker/setup-buildx-action@v4.0.0
 
@@ -90,7 +93,7 @@ jobs:
 
       - name: Make package public
         env:
-          GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.CALLER_GITHUB_TOKEN }}
           PKG: ${{ inputs.image_prefix }}-${{ inputs.service_id }}
           OWNER: ${{ inputs.image_owner }}
         run: |
@@ -120,7 +123,7 @@ jobs:
 
       - name: Notify infra deploy
         env:
-          DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+          DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
           INFRA_REPO: ${{ inputs.infra_github_repo }}
         run: |
           set -euo pipefail
