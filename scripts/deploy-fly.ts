@@ -26,6 +26,7 @@ import {
   type ServicesConfig,
 } from "../lib/services.js";
 import { requireFlyApiToken } from "../lib/fly-token.js";
+import { waitForServiceHealthy } from "../lib/fly-health.js";
 
 type Args = {
   readonly ids: readonly string[];
@@ -219,6 +220,10 @@ async function deployService(
       deployed = await runDeploy(mirrored, waitForHealth);
     }
     if (!deployed.ok) throw new Error(deployed.detail);
+  }
+
+  if (flyIsPublic(service) && service.health_check) {
+    await waitForServiceHealthy(config, service);
   }
 
   if (!flyIsPublic(service) && flyMinMachines(service) > 0) {

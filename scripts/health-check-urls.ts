@@ -1,43 +1,58 @@
 #!/usr/bin/env bun
 /**
- * HTTP health-check services with health_check: true in services.yaml.
+ * HTTP + Fly health-check for public services in services.yaml.
  *
  * Usage:
  *   bun run scripts/health-check-urls.ts
  *   bun run scripts/health-check-urls.ts --id snake-game
- *   bun run scripts/health-check-urls.ts --retries 5 --timeout-ms 30000
+ *   bun run scripts/health-check-urls.ts --all-public
  */
 import {
+  flyChecksPassing,
+  probeHttp,
+  restartStartedMachines,
+  serviceHealthUrl,
+} from "../lib/fly-health.js";
+import {
+  flyAppName,
   isAlwaysOn,
   isPublicService,
   loadServicesConfig,
+  type ServiceSpec,
+  type ServicesConfig,
 } from "../lib/services.js";
 
 type Args = {
   readonly ids: readonly string[];
+  readonly allPublic: boolean;
   readonly timeoutMs: number;
   readonly retries: number;
   readonly retryDelayMs: number;
   readonly coldStartTimeoutMs: number;
+  readonly verifyFlyChecks: boolean;
 };
 
 function parseArgs(argv: readonly string[]): Args {
   const ids: string[] = [];
-  let timeoutMs = 30_000;
-  let coldStartTimeoutMs = 90_000;
-  let retries = 4;
-  let retryDelayMs = 5_000;
+  let allPublic = false;
+  let timeoutMs = 15_000;
+  let coldStartTimeoutMs = 45_000;
+  let retries = 1;
+  let retryDelayMs = 3_000;
+  let verifyFlyChecks = true;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--id") ids.push(argv[++i] ?? "");
+    else if (arg === "--all-public") allPublic = true;
     else if (arg === "--timeout-ms") timeoutMs = Number(argv[++i] ?? timeoutMs);
     else if (arg === "--cold-start-timeout-ms")
       coldStartTimeoutMs = Number(argv[++i] ?? coldStartTimeoutMs);
     else if (arg === "--retries") retries = Number(argv[++i] ?? retries);
     else if (arg === "--retry-delay-ms") retryDelayMs = Number(argv[++i] ?? retryDelayMs);
+    else if (arg === "--no-fly-checks") verifyFlyChecks = false;
     else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: bun run scripts/health-check-urls.ts [--id <id> ...] [--timeout-ms <ms>] [--cold-start-timeout-ms <ms>] [--retries <n>]",
+        "Usage: bun run scripts/health-check-urls.ts [--id <id> ...] [--all-public] [--timeout-ms <ms>] [--cold-start-timeout-ms <ms>] [--retries <n>] [--no-fly-checks]",
       );
       process.exit(0);
     } else {
@@ -45,54 +60,82 @@ function parseArgs(argv: readonly string[]): Args {
       process.exit(2);
     }
   }
-  return { ids: ids.filter(Boolean), timeoutMs, coldStartTimeoutMs, retries, retryDelayMs };
+  return {
+    ids: ids.filter(Boolean),
+    allPublic,
+    timeoutMs,
+    coldStartTimeoutMs,
+    retries,
+    retryDelayMs,
+    verifyFlyChecks,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function checkOnce(url: string, timeoutMs: number): Promise<{ ok: boolean; status: number; error?: string }> {
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    return { ok: res.ok, status: res.status };
-  } catch (err) {
-    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) };
-  }
+function healthCheckServices(config: ServicesConfig, args: Args): readonly ServiceSpec[] {
+  return config.services.filter((service) => {
+    if (!service.health_check || !isPublicService(service) || !service.hostname) return false;
+    if (args.ids.length > 0) return args.ids.includes(service.id);
+    if (args.allPublic) return true;
+    return isAlwaysOn(service);
+  });
 }
 
 async function checkWithRetries(
-  url: string,
+  config: ServicesConfig,
+  service: ServiceSpec,
   args: Args,
-  perAttemptTimeoutMs: number,
-): Promise<{ ok: boolean; status: number; attempts: number; error?: string }> {
+): Promise<{ ok: boolean; error?: string }> {
+  const url = serviceHealthUrl(service);
+  if (!url) return { ok: true };
+
+  const perAttemptTimeout = isAlwaysOn(service) ? args.timeoutMs : args.coldStartTimeoutMs;
   const max = args.retries + 1;
+  let restarted = false;
+
   for (let attempt = 1; attempt <= max; attempt++) {
-    const result = await checkOnce(url, perAttemptTimeoutMs);
-    if (result.ok) {
-      console.log(`  ✓ ${url} (${result.status}) attempt ${attempt}/${max}`);
-      return { ok: true, status: result.status, attempts: attempt };
+    const http = await probeHttp(url, perAttemptTimeout);
+    if (http.ok) {
+      if (args.verifyFlyChecks) {
+        const app = flyAppName(config, service.id);
+        if (!(await flyChecksPassing(app))) {
+          if (!restarted) {
+            console.log(`  ${service.id}: HTTP ${http.status} but Fly checks failing — restarting machines`);
+            await restartStartedMachines(app);
+            restarted = true;
+            await sleep(15_000);
+            continue;
+          }
+          const err = "Fly health checks not passing";
+          console.log(`  ✗ ${service.id} attempt ${attempt}/${max}: ${err}`);
+          if (attempt < max) {
+            await sleep(args.retryDelayMs);
+            continue;
+          }
+          return { ok: false, error: err };
+        }
+      }
+      console.log(`  ✓ ${service.id} ${url} (HTTP ${http.status}) attempt ${attempt}/${max}`);
+      return { ok: true };
     }
-    const err = result.error ?? `HTTP ${result.status}`;
-    console.log(`  ✗ ${url} attempt ${attempt}/${max}: ${err}`);
+
+    const err = http.error ?? `HTTP ${http.status}`;
+    console.log(`  ✗ ${service.id} attempt ${attempt}/${max}: ${err}`);
+    if (http.fastFail) return { ok: false, error: err };
     if (attempt < max) await sleep(args.retryDelayMs);
-    else return { ok: false, status: result.status, attempts: attempt, error: err };
+    else return { ok: false, error: err };
   }
-  return { ok: false, status: 0, attempts: max, error: "exhausted retries" };
+
+  return { ok: false, error: "exhausted retries" };
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const config = loadServicesConfig();
-  const services = config.services.filter((s) => {
-    if (!s.health_check || !isPublicService(s) || !s.hostname) return false;
-    if (args.ids.length === 0) return isAlwaysOn(s);
-    return args.ids.includes(s.id);
-  });
+  const services = healthCheckServices(config, args);
 
   if (services.length === 0) {
     console.log("No services to health-check");
@@ -103,11 +146,9 @@ async function main(): Promise<void> {
   const failed: string[] = [];
 
   for (const service of services) {
-    const path = service.health_path ?? "/";
-    const url = `https://${service.hostname}${path}`;
-    const perAttemptTimeout = isAlwaysOn(service) ? args.timeoutMs : args.coldStartTimeoutMs;
+    const url = serviceHealthUrl(service);
     console.log(`Checking ${service.id} → ${url}`);
-    const result = await checkWithRetries(url, args, perAttemptTimeout);
+    const result = await checkWithRetries(config, service, args);
     if (!result.ok) failed.push(`${service.id}: ${result.error}`);
   }
 

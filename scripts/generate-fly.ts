@@ -59,12 +59,12 @@ function generateFlyToml(config: ServicesConfig, service: ServiceSpec, tag: stri
       `  min_machines_running = ${minMachines}`,
       "",
       "  [[http_service.checks]]",
-      '    grace_period = "30s"',
+      `    grace_period = "${minMachines > 0 ? "30s" : "60s"}"`,
       '    interval = "15s"',
       '    method = "GET"',
       `    path = "${service.health_path ?? "/"}"`,
       '    protocol = "http"',
-      '    timeout = "5s"',
+      `    timeout = "${minMachines > 0 ? "5s" : "10s"}"`,
     );
   }
 
@@ -74,6 +74,14 @@ function generateFlyToml(config: ServicesConfig, service: ServiceSpec, tag: stri
       "[processes]",
       '  app = ""',
     );
+  }
+
+  const envEntries = Object.entries(service.env ?? {});
+  if (envEntries.length > 0) {
+    lines.push("", "[env]");
+    for (const [key, value] of envEntries) {
+      lines.push(`  ${key} = "${value.replace(/"/g, '\\"')}"`);
+    }
   }
 
   return `${HEADER}${lines.join("\n")}\n`;

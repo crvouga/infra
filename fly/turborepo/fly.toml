@@ -20,9 +20,15 @@ primary_region = "iad"
   min_machines_running = 0
 
   [[http_service.checks]]
-    grace_period = "30s"
+    grace_period = "60s"
     interval = "15s"
     method = "GET"
     path = "/health"
     protocol = "http"
-    timeout = "5s"
+    timeout = "10s"
+
+[env]
+  PORT = "8080"
+  VAULT_ADDR = "https://vault.chrisvouga.dev"
+  VAULT_PROJECT = "personal"
+  VAULT_CONFIG = "prd"

@@ -150,6 +150,8 @@ services:
     build_context: .
     port: 80
     health_check: true
+    # "/" redirects to /login/send-link; Fly checks do not follow redirects.
+    health_path: /login/send-link
 
   - id: connect-four
     hostname: connectfour.chrisvouga.dev

@@ -2,7 +2,7 @@ name: Deploy Pipeline
 
 # Fly.io stack — fully automated via GitHub Actions.
 #
-#   prepare → dns-sync → make-ghcr-public → fly-deploy (matrix: deploy + health-check per service)
+#   prepare → dns-sync → make-ghcr-public → fly-deploy (matrix) → health-check-all
 #
 # Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
 #
@@ -138,7 +138,6 @@ jobs:
   fly-deploy:
     runs-on: ubuntu-latest
     needs: prepare
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -179,3 +178,20 @@ jobs:
       - name: Health-check service
         if: success()
         run: bun run health-check --id "${{ matrix.service_id }}"
+
+  health-check-all:
+    runs-on: ubuntu-latest
+    needs: [prepare, fly-deploy]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
+      - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Health-check all public services
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+        run: bun run health-check --all-public
