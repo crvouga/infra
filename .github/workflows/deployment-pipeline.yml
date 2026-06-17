@@ -18,6 +18,17 @@ jobs:
       group: check-${{ github.workflow }}-${{ github.head_ref || github.ref || github.run_id }}
       cancel-in-progress: true
     timeout-minutes: 20
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_API: ${{ secrets.TURBO_API }}
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+      TURBO_CACHE: ${{ secrets.TURBO_CACHE }}
+      B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
+      B2_S3_REGION: ${{ secrets.B2_S3_REGION }}
+      B2_S3_ACCESS_KEY_ID: ${{ secrets.B2_S3_ACCESS_KEY_ID }}
+      B2_S3_SECRET_ACCESS_KEY: ${{ secrets.B2_S3_SECRET_ACCESS_KEY }}
+      B2_BUCKET: ${{ secrets.B2_BUCKET }}
+      VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -26,24 +37,9 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Import Vault secrets (dev)
-        uses: hashicorp/vault-action@v4
+        uses: ./.github/actions/vault-secrets
         with:
-          url: https://vault.chrisvouga.dev
-          method: jwt
-          path: jwt
-          role: github-actions
-          jwtGithubAudience: https://vault.chrisvouga.dev
-          secrets: |
-            secret/data/personal/dev TURBO_TOKEN | TURBO_TOKEN ;
-            secret/data/personal/dev TURBO_API | TURBO_API ;
-            secret/data/personal/dev TURBO_TEAM | TURBO_TEAM ;
-            secret/data/personal/dev TURBO_CACHE | TURBO_CACHE ;
-            secret/data/personal/dev B2_S3_ENDPOINT | B2_S3_ENDPOINT ;
-            secret/data/personal/dev B2_S3_REGION | B2_S3_REGION ;
-            secret/data/personal/dev B2_S3_ACCESS_KEY_ID | B2_S3_ACCESS_KEY_ID ;
-            secret/data/personal/dev B2_S3_SECRET_ACCESS_KEY | B2_S3_SECRET_ACCESS_KEY ;
-            secret/data/personal/dev B2_BUCKET | B2_BUCKET ;
-            secret/data/personal/dev VAULT_TOKEN | VAULT_TOKEN
+          vault_config: dev
       - name: Verify Vault secrets (dev)
         env:
           CI: true
@@ -58,6 +54,17 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 10
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_API: ${{ secrets.TURBO_API }}
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+      TURBO_CACHE: ${{ secrets.TURBO_CACHE }}
+      B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
+      B2_S3_REGION: ${{ secrets.B2_S3_REGION }}
+      B2_S3_ACCESS_KEY_ID: ${{ secrets.B2_S3_ACCESS_KEY_ID }}
+      B2_S3_SECRET_ACCESS_KEY: ${{ secrets.B2_S3_SECRET_ACCESS_KEY }}
+      B2_BUCKET: ${{ secrets.B2_BUCKET }}
+      VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -66,24 +73,9 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Import Vault secrets (prd)
-        uses: hashicorp/vault-action@v4
+        uses: ./.github/actions/vault-secrets
         with:
-          url: https://vault.chrisvouga.dev
-          method: jwt
-          path: jwt
-          role: github-actions
-          jwtGithubAudience: https://vault.chrisvouga.dev
-          secrets: |
-            secret/data/personal/prd TURBO_TOKEN | TURBO_TOKEN ;
-            secret/data/personal/prd TURBO_API | TURBO_API ;
-            secret/data/personal/prd TURBO_TEAM | TURBO_TEAM ;
-            secret/data/personal/prd TURBO_CACHE | TURBO_CACHE ;
-            secret/data/personal/prd B2_S3_ENDPOINT | B2_S3_ENDPOINT ;
-            secret/data/personal/prd B2_S3_REGION | B2_S3_REGION ;
-            secret/data/personal/prd B2_S3_ACCESS_KEY_ID | B2_S3_ACCESS_KEY_ID ;
-            secret/data/personal/prd B2_S3_SECRET_ACCESS_KEY | B2_S3_SECRET_ACCESS_KEY ;
-            secret/data/personal/prd B2_BUCKET | B2_BUCKET ;
-            secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN
+          vault_config: prd
       - name: Smoke test remote cache
         env:
           CI: true
