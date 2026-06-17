@@ -1,0 +1,27 @@
+name: DNS sync
+
+# Keeps vault.chrisvouga.dev pointed at the Fly app (CNAME -> *.fly.dev).
+# Run on a schedule so a missed deploy cannot leave the hostname unresolvable.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-dns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Reconcile Cloudflare DNS
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/sync-dns.sh
+          ./scripts/sync-dns.sh

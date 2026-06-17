@@ -39,7 +39,9 @@ jobs:
       - name: Ensure cert
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl certs add vault.chrisvouga.dev --config fly.toml || true
+        run: |
+          flyctl certs add vault.chrisvouga.dev --config fly.toml || true
+          flyctl certs check vault.chrisvouga.dev --config fly.toml
 
       - name: Reconcile DNS
         env:

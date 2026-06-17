@@ -207,6 +207,6 @@ vault/
 | Symptom | Fix |
 |---------|-----|
 | Smoke test returns 503 | OpenBao is sealed — run manual unseal or re-run **Unseal** workflow |
-| DNS not resolving | Verify `vault.chrisvouga.dev` in infra DNS sync |
+| DNS not resolving | Run `make sync-dns` (needs `CF_API_TOKEN`) or re-run **Fly deploy** / **DNS sync** workflow; flush local cache: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder` |
 | DB connection errors | Verify `DB_CONNECTION_URI` in Vault / infra env sync |
 | Migration job fails | Check `DB_CONNECTION_URI` GitHub secret; ensure Neon allows GitHub Actions IPs |

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Reconcile Cloudflare DNS for vault.chrisvouga.dev -> Fly app ingress IPs
-# (DNS-only A/AAAA records; Fly terminates TLS itself).
+# Reconcile Cloudflare DNS for vault.chrisvouga.dev -> crvouga-vault.fly.dev
+# (DNS-only CNAME; Fly terminates TLS for the custom hostname).
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+FLY_TOML="${REPO_ROOT}/fly.toml"
 
 ZONE_NAME="${ZONE_NAME:-chrisvouga.dev}"
 RECORD_NAME="${RECORD_NAME:-vault.chrisvouga.dev}"
-FLY_APP="${FLY_APP:-crvouga-vault}"
+FLY_APP="${FLY_APP:-}"
 CF_TOKEN="${CLOUDFLARE_API_TOKEN:-${CF_API_TOKEN:-}}"
 
 require_cmd() {
@@ -17,12 +21,17 @@ require_cmd() {
 
 require_cmd curl
 require_cmd jq
-require_cmd flyctl
 
 if [ -z "${CF_TOKEN}" ]; then
   echo "ERROR: CLOUDFLARE_API_TOKEN (or CF_API_TOKEN) is required" >&2
   exit 1
 fi
+
+if [ -z "${FLY_APP}" ] && [ -f "${FLY_TOML}" ]; then
+  FLY_APP="$(grep -E '^app[[:space:]]*=' "${FLY_TOML}" | head -1 | sed -E 's/^app[[:space:]]*=[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')"
+fi
+FLY_APP="${FLY_APP:-crvouga-vault}"
+FLY_CNAME_TARGET="${FLY_CNAME_TARGET:-${FLY_APP}.fly.dev}"
 
 API_BASE="https://api.cloudflare.com/client/v4"
 
@@ -46,39 +55,71 @@ if [ -z "$ZONE_ID" ]; then
   exit 1
 fi
 
-echo "==> Fetching Fly ingress IPs for ${FLY_APP}..."
-IPS_JSON="$(flyctl ips list -a "$FLY_APP" --json)"
-V4="$(echo "$IPS_JSON" | jq -r '.[] | select(.Type=="shared_v4" or .Type=="v4") | .Address' | head -n1)"
-V6="$(echo "$IPS_JSON" | jq -r '.[] | select(.Type=="v6") | .Address' | head -n1)"
-
-if [ -z "$V4" ] && [ -z "$V6" ]; then
-  echo "ERROR: No Fly ingress IPs found for ${FLY_APP} — deploy the app first" >&2
-  exit 1
-fi
-
-echo "==> Existing DNS records for ${RECORD_NAME}..."
+echo "==> Fetching existing DNS records for ${RECORD_NAME}..."
 EXISTING="$(cf_request GET "/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}")"
 
-reconcile() {
-  local type="$1" content="$2"
-  [ -z "$content" ] && return 0
+delete_records() {
+  local type="$1"
+  local ids
+  ids="$(echo "$EXISTING" | jq -r --arg type "$type" '.result[] | select(.type==$type) | .id')"
+  while IFS= read -r record_id; do
+    [ -z "$record_id" ] && continue
+    echo "==> Deleting stale ${type} record ${RECORD_NAME} (${record_id})"
+    cf_request DELETE "/zones/${ZONE_ID}/dns_records/${record_id}" | jq -e '.success' >/dev/null
+  done <<< "$ids"
+}
 
+reconcile_cname() {
+  local content="$1"
   local record_id
-  record_id="$(echo "$EXISTING" | jq -r --arg type "$type" '.result[] | select(.type==$type) | .id' | head -n1)"
+  record_id="$(echo "$EXISTING" | jq -r '.result[] | select(.type=="CNAME") | .id' | head -n1)"
   local body
-  body="$(jq -n --arg name "$RECORD_NAME" --arg type "$type" --arg content "$content" \
-    '{name: $name, type: $type, content: $content, proxied: false, ttl: 1}')"
+  body="$(jq -n --arg name "$RECORD_NAME" --arg content "$content" \
+    '{name: $name, type: "CNAME", content: $content, proxied: false, ttl: 1}')"
 
   if [ -n "$record_id" ]; then
-    echo "==> Updating ${type} record ${RECORD_NAME} -> ${content}"
+    local current
+    current="$(echo "$EXISTING" | jq -r '.result[] | select(.type=="CNAME") | .content' | head -n1)"
+    if [ "$current" = "$content" ]; then
+      echo "==> OK CNAME ${RECORD_NAME} -> ${content}"
+      return 0
+    fi
+    echo "==> Updating CNAME ${RECORD_NAME} -> ${content}"
     cf_request PUT "/zones/${ZONE_ID}/dns_records/${record_id}" "$body" | jq -e '.success' >/dev/null
   else
-    echo "==> Creating ${type} record ${RECORD_NAME} -> ${content}"
+    echo "==> Creating CNAME ${RECORD_NAME} -> ${content}"
     cf_request POST "/zones/${ZONE_ID}/dns_records" "$body" | jq -e '.success' >/dev/null
   fi
 }
 
-reconcile A "$V4"
-reconcile AAAA "$V6"
+echo "==> Reconciling ${RECORD_NAME} -> ${FLY_CNAME_TARGET}"
+delete_records A
+delete_records AAAA
+reconcile_cname "$FLY_CNAME_TARGET"
 
-echo "==> DNS reconciled for ${RECORD_NAME}"
+echo "==> Waiting for public DNS propagation..."
+for attempt in 1 2 3 4 5 6; do
+  RESOLVED="$(dig +short "${RECORD_NAME}" CNAME @1.1.1.1 2>/dev/null | head -n1 || true)"
+  if [ -z "$RESOLVED" ]; then
+    RESOLVED="$(dig +short "${RECORD_NAME}" @1.1.1.1 2>/dev/null | head -n1 || true)"
+  fi
+  if [ -n "$RESOLVED" ]; then
+    echo "==> Public DNS resolves ${RECORD_NAME} -> ${RESOLVED}"
+    break
+  fi
+  echo "  attempt ${attempt}/6 — not visible on 1.1.1.1 yet, waiting 10s..."
+  sleep 10
+done
+
+if [ -z "${RESOLVED:-}" ]; then
+  echo "ERROR: ${RECORD_NAME} still does not resolve via public DNS (1.1.1.1)" >&2
+  exit 1
+fi
+
+echo "==> Checking HTTPS health..."
+if curl -sf --connect-timeout 10 "https://${RECORD_NAME}/v1/sys/health?standbyok=true" >/dev/null; then
+  echo "==> DNS reconciled — https://${RECORD_NAME} is healthy"
+else
+  echo "WARNING: DNS record exists but HTTPS health check failed; cert or Fly routing may still be catching up" >&2
+  exit 1
+fi
