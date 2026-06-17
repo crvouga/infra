@@ -65,6 +65,7 @@ require_cmd() {
 
 require_cmd flyctl "Install: https://fly.io/docs/hands-on/install-flyctl/"
 require_cmd gh     "Install: https://cli.github.com/"
+require_cmd jq     "Install: https://jqlang.github.io/jq/"
 
 # --- Verify flyctl auth ---
 if ! flyctl auth whoami >/dev/null 2>&1; then
@@ -84,7 +85,7 @@ if [ ! -f "$FLY_TOML" ]; then
   exit 1
 fi
 
-APP_NAME="$(grep -E '^app\s*=' "$FLY_TOML" | head -1 | sed 's/.*=\s*"\?\([^"]*\)"\?.*/\1/' | tr -d '[:space:]')"
+APP_NAME="$(grep -E '^app[[:space:]]*=' "$FLY_TOML" | head -1 | sed -E 's/^app[[:space:]]*=[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')"
 if [ -z "$APP_NAME" ]; then
   echo "ERROR: Could not parse app name from ${FLY_TOML}" >&2
   exit 1
@@ -108,9 +109,8 @@ NEW_TOKEN="$(flyctl tokens create deploy \
   --app "$APP_NAME" \
   --expiry "$EXPIRY" \
   --config "$FLY_TOML" \
-  --json \
-  | grep -o '"token":"[^"]*"' \
-  | sed 's/"token":"//;s/"//')"
+  --json 2>/dev/null \
+  | jq -r '.token // empty')"
 
 # flyctl may print the token directly (non-JSON) depending on version
 if [ -z "$NEW_TOKEN" ]; then
@@ -118,7 +118,7 @@ if [ -z "$NEW_TOKEN" ]; then
   NEW_TOKEN="$(flyctl tokens create deploy \
     --app "$APP_NAME" \
     --expiry "$EXPIRY" \
-    --config "$FLY_TOML")"
+    --config "$FLY_TOML" 2>/dev/null)"
 fi
 
 NEW_TOKEN="$(printf '%s' "$NEW_TOKEN" | tr -d '[:space:]')"
