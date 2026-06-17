@@ -125,14 +125,6 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.toml --wait-timeout 15m
 
-      - name: Ensure cert
-        if: github.event_name == 'push' || inputs.unseal_only != true
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          flyctl certs add vault.chrisvouga.dev --config fly.toml || true
-          flyctl certs check vault.chrisvouga.dev --config fly.toml
-
       - name: Reconcile DNS
         if: github.event_name == 'push' || inputs.unseal_only != true
         env:
@@ -141,6 +133,46 @@ jobs:
         run: |
           chmod +x scripts/sync-dns.sh
           ./scripts/sync-dns.sh
+
+      - name: Ensure TLS certificate
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          flyctl certs add vault.chrisvouga.dev --config fly.toml 2>/dev/null || true
+          for attempt in $(seq 1 12); do
+            echo "==> Checking TLS certificate (attempt ${attempt}/12)..."
+            CONFIGURED="$(flyctl certs list --config fly.toml --json | jq -r '.[] | select(.hostname=="vault.chrisvouga.dev") | .configured')"
+            STATUS="$(flyctl certs list --config fly.toml --json | jq -r '.[] | select(.hostname=="vault.chrisvouga.dev") | .status')"
+            if [ "${CONFIGURED}" = "true" ]; then
+              echo "==> Certificate configured (status=${STATUS})"
+              flyctl certs check vault.chrisvouga.dev --config fly.toml
+              exit 0
+            fi
+            flyctl certs check vault.chrisvouga.dev --config fly.toml || true
+            sleep 15
+          done
+          echo "ERROR: TLS certificate for vault.chrisvouga.dev is not configured" >&2
+          flyctl certs list --config fly.toml
+          exit 1
+
+      - name: Verify custom domain
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            CODE="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 15 \
+              "https://vault.chrisvouga.dev/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200" || echo "000")"
+            if [ "${CODE}" = "200" ] || [ "${CODE}" = "503" ]; then
+              echo "==> https://vault.chrisvouga.dev reachable (HTTP ${CODE})"
+              exit 0
+            fi
+            echo "  attempt ${attempt}/10 — HTTP ${CODE}, retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: https://vault.chrisvouga.dev is not reachable" >&2
+          exit 1
 
       - name: Unseal OpenBao
         env:
