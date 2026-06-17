@@ -1,6 +1,6 @@
 # Secret Store (OpenBao)
 
-Production-ready [OpenBao](https://openbao.org/) deployment on the [chrisvouga.dev](https://github.com/crvouga/chrisvouga.dev) single-node stack — Neon Postgres storage, Traefik routing, and automated GitHub Actions.
+Production-ready [OpenBao](https://openbao.org/) deployment on Fly.io — Neon Postgres storage, Cloudflare DNS, and a single GitHub Actions deploy pipeline.
 
 **URL:** https://vault.chrisvouga.dev
 
@@ -8,19 +8,15 @@ Production-ready [OpenBao](https://openbao.org/) deployment on the [chrisvouga.d
 
 ```
 vault repo (push to main)
-  ├── publish-image.yml  → ghcr.io/crvouga/chrisvouga-vault
-  └── migrate-db.yml     → Neon Postgres (secret_store schema)
+  └── deploy.yml
+        ├── migrate Neon Postgres (secret_store schema)
+        ├── build + push ghcr.io/crvouga/chrisvouga-vault
+        ├── Fly deploy (crvouga-vault)
+        ├── reconcile DNS (vault.chrisvouga.dev)
+        └── unseal + smoke-test from crvouga.kv
 
-infra deploy-pipeline
-  ├── deploy vault container on origin droplet
-  └── vault-unseal job → triggers unseal.yml in this repo
-
-unseal.yml (this repo)
-  ├── unseal OpenBao from crvouga.kv
-  └── smoke-test KV round-trip
-
-OpenBao (Docker) ──storage──► Neon Postgres (secret_store schema)
-Traefik ──► vault.chrisvouga.dev
+OpenBao (Fly) ──storage──► Neon Postgres (secret_store schema)
+Cloudflare DNS ──► vault.chrisvouga.dev ──► Fly TLS
 crvouga.kv ──unseal keys + root_token──► CI unseal + smoke-test
 ```
 
@@ -74,13 +70,13 @@ Flags:
 
 Optional overrides via [`.env`](.env) or [`.env.secrets`](.env.secrets.example). Set `NEON_PROJECT_ID` if you have multiple Neon projects.
 
-Runtime secrets (`DB_CONNECTION_URI`, `BAO_API_ADDR`) are synced to the node via infra `services.yaml` and Vault.
+Runtime secrets (`DB_CONNECTION_URI`) are synced to Fly via the deploy workflow.
 
 ### 2. Deploy via GitHub Actions
 
-Push to `main` on this repo (or run **Publish image**). Infra deploy-pipeline pulls the image and starts the container. After deploy, infra triggers **Unseal** in this repo.
+Push to `main` on this repo (or run **Deploy** manually). The workflow migrates the DB, builds the image, deploys to Fly, reconciles DNS, unseals OpenBao, and runs smoke tests.
 
-Every container restart leaves OpenBao **sealed**; CI unseals automatically.
+Every container restart leaves OpenBao **sealed**; CI unseals automatically on each deploy.
 
 ### 3. Initialize OpenBao (one-time, local)
 
@@ -119,11 +115,17 @@ export DB_CONNECTION_URI="postgres://..."
 ./scripts/migrate.sh
 ```
 
-The **Migrate DB** workflow runs migrations on push when migration files change.
+The **Deploy** workflow runs migrations on every push to `main` (before build/deploy).
 
 ## Manual Unseal
 
-After a restart or redeploy, OpenBao starts **sealed**. CI auto-unseals on every deploy from `crvouga.kv`. To unseal manually:
+After a restart or redeploy, OpenBao starts **sealed**. CI auto-unseals on every deploy from `crvouga.kv`. To re-unseal without redeploying:
+
+```bash
+gh workflow run deploy.yml -f unseal_only=true
+```
+
+To unseal manually from the CLI:
 
 ```bash
 export VAULT_ADDR="https://vault.chrisvouga.dev"
@@ -146,7 +148,7 @@ chmod +x scripts/smoke-test.sh
 
 ### In CI
 
-Smoke tests run in **Unseal** workflow after auto-unseal. The job reads `root_token` from `crvouga.kv` via [`scripts/fetch-vault-token.sh`](scripts/fetch-vault-token.sh).
+Smoke tests run at the end of the **Deploy** workflow after auto-unseal. The job reads `root_token` from `crvouga.kv` via [`scripts/fetch-vault-token.sh`](scripts/fetch-vault-token.sh).
 
 ## Syncing dev keys to prd
 
@@ -186,9 +188,7 @@ Returns HTTP 200 even when sealed or uninitialized, so the process stays healthy
 ```
 vault/
 ├── .github/workflows/
-│   ├── publish-image.yml          # Build + push image → infra deploy
-│   ├── deploy.yml                 # Neon DB migrations
-│   └── unseal.yml                 # Auto-unseal + smoke-test
+│   └── deploy.yml                 # migrate → build → Fly deploy → DNS → unseal → smoke
 ├── cli/                           # Global vault wrapper (vault run / vault setup)
 ├── config/openbao.hcl             # OpenBao server config
 ├── migrations/                    # SQL migrations (secret_store schema)
@@ -206,7 +206,7 @@ vault/
 
 | Symptom | Fix |
 |---------|-----|
-| Smoke test returns 503 | OpenBao is sealed — run manual unseal or re-run **Unseal** workflow |
-| DNS not resolving | Run `make sync-dns` (needs `CF_API_TOKEN`) or re-run **Fly deploy** / **DNS sync** workflow; flush local cache: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder` |
+| Smoke test returns 503 | OpenBao is sealed — run manual unseal or `gh workflow run deploy.yml -f unseal_only=true` |
+| DNS not resolving | Run `make sync-dns` (needs `CF_API_TOKEN`) or re-run **Deploy** workflow; flush local cache: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder` |
 | DB connection errors | Verify `DB_CONNECTION_URI` in Vault / infra env sync |
 | Migration job fails | Check `DB_CONNECTION_URI` GitHub secret; ensure Neon allows GitHub Actions IPs |

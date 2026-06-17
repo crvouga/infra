@@ -1,34 +1,43 @@
-name: Migrate DB
+name: Deploy
 
-# Run Postgres schema migrations for OpenBao storage.
-# Image build/push and Fly deploy are handled by publish-image.yml + fly-deploy.yml.
+# Full pipeline on push to main: migrate -> build image -> Fly deploy -> DNS -> unseal -> smoke.
+# workflow_dispatch with unseal_only skips rebuild/redeploy for out-of-band recovery.
 
 on:
   push:
     branches:
       - main
-    paths:
-      - scripts/migrate.sh
-      - scripts/lib/**
+    paths-ignore:
+      - "**/*.md"
   workflow_dispatch:
+    inputs:
+      unseal_only:
+        description: Skip migrate/build/deploy/DNS; only unseal and smoke test
+        type: boolean
+        default: false
 
 concurrency:
-  group: migrate-db-${{ github.ref }}
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  packages: write
+
+env:
+  VAULT_ADDR: https://vault.chrisvouga.dev
+
 jobs:
-  migrate-db:
-    name: Run DB Migrations
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-      - name: Install PostgreSQL client
+      - name: Install dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y curl ca-certificates lsb-release
+          sudo apt-get install -y curl ca-certificates lsb-release jq
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc
@@ -39,9 +48,114 @@ jobs:
           sudo apt-get install -y postgresql-client-17
 
       - name: Run migrations
+        if: github.event_name == 'push' || inputs.unseal_only != true
         env:
           DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
           chmod +x scripts/migrate.sh
           ./scripts/migrate.sh
+
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        uses: docker/login-action@v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v4.0.0
+        if: github.event_name == 'push' || inputs.unseal_only != true
+
+      - name: Build and push
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        uses: docker/build-push-action@v7.2.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ghcr.io/crvouga/chrisvouga-vault:latest
+            ghcr.io/crvouga/chrisvouga-vault:${{ github.sha }}
+
+      - name: Make package public
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for URL in \
+            "https://api.github.com/user/packages/container/chrisvouga-vault/visibility" \
+            "https://api.github.com/orgs/crvouga/packages/container/chrisvouga-vault/visibility"
+          do
+            STATUS=$(curl -s -o /tmp/ghcr-vis-body.txt -w "%{http_code}" \
+              -X PATCH \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/json" \
+              -d '{"visibility":"public"}' \
+              "${URL}")
+            if [ "${STATUS}" -ge 200 ] && [ "${STATUS}" -lt 300 ]; then
+              echo "Package chrisvouga-vault is public (${URL})"
+              exit 0
+            fi
+            if [ "${STATUS}" != "404" ]; then
+              echo "Warning: could not set chrisvouga-vault public via ${URL} (HTTP ${STATUS})"
+              cat /tmp/ghcr-vis-body.txt || true
+            fi
+          done
+          echo "Package chrisvouga-vault visibility not updated (may not exist yet on first push)"
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: github.event_name == 'push' || inputs.unseal_only != true
+
+      - name: Sync Fly secrets
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+        run: flyctl secrets set DB_CONNECTION_URI="${DB_CONNECTION_URI}" --config fly.toml
+
+      - name: Deploy to Fly
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config fly.toml --wait-timeout 15m
+
+      - name: Ensure cert
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl certs add vault.chrisvouga.dev --config fly.toml || true
+          flyctl certs check vault.chrisvouga.dev --config fly.toml
+
+      - name: Reconcile DNS
+        if: github.event_name == 'push' || inputs.unseal_only != true
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          chmod +x scripts/sync-dns.sh
+          ./scripts/sync-dns.sh
+
+      - name: Unseal OpenBao
+        env:
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/install-vault-cli.sh scripts/repair-openbao-auth-mounts.sh scripts/unseal.sh
+          ./scripts/install-vault-cli.sh
+          ./scripts/repair-openbao-auth-mounts.sh
+          ./scripts/unseal.sh
+
+      - name: Smoke test
+        env:
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+        run: |
+          set -euo pipefail
+          export VAULT_TOKEN="$(./scripts/fetch-vault-token.sh)"
+          ./scripts/smoke-test.sh

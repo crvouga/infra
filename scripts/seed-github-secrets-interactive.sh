@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Interactively prompt for and set the GitHub Actions secrets required by
-# this repo's CI (publish-image.yml, fly-deploy.yml, unseal.yml, deploy.yml).
+# this repo's CI (deploy.yml).
 #
 # Use this when you don't have the values sitting in a CLI/env already —
 # scripts/seed-github-secrets.sh auto-fetches from authenticated CLIs instead.
