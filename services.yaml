@@ -73,6 +73,8 @@ services:
     env:
       PORT: "3000"
     secrets: &moviefinder_secrets
+      - name: DATABASE_URL
+        source: vault
       - name: TMDB_API_READ_ACCESS_TOKEN
         source: vault
       - name: TWILIO_ACCOUNT_SID
