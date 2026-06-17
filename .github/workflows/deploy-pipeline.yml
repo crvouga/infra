@@ -2,7 +2,7 @@ name: Deploy Pipeline
 
 # Fly.io stack — fully automated via GitHub Actions.
 #
-#   prepare → dns-sync → fly-secrets → make-ghcr-public → deploy → health-check
+#   prepare → dns-sync → make-ghcr-public → fly-deploy (matrix) → health-check
 #
 # Triggers:
 #   - push to main
@@ -47,25 +47,6 @@ permissions:
   packages: write
 
 env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  TMDB_API_READ_ACCESS_TOKEN: ${{ secrets.TMDB_API_READ_ACCESS_TOKEN }}
-  TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-  TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-  TWILIO_SERVICE_SID: ${{ secrets.TWILIO_SERVICE_SID }}
-  GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
-  VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
-  FLY_TOKEN: ${{ secrets.FLY_TOKEN }}
-  DATABASE_URL: ${{ secrets.DATABASE_URL }}
-  S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-  S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
-  S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
-  S3_BUCKET: ${{ secrets.S3_BUCKET }}
-  S3_REGION: ${{ secrets.S3_REGION }}
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  NORMALIZER_APP_GOOGLE_CLIENT_ID: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_ID }}
-  NORMALIZER_APP_GOOGLE_CLIENT_SECRET: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_SECRET }}
   SERVICE_ID: ${{ github.event.client_payload.id || inputs.service_id || '' }}
   IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'latest' }}
 
@@ -74,6 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       service_id: ${{ steps.resolve.outputs.service_id }}
+      service_ids: ${{ steps.resolve.outputs.service_ids }}
       image_tag: ${{ steps.resolve.outputs.image_tag }}
       health_check_args: ${{ steps.resolve.outputs.health_check_args }}
     steps:
@@ -91,10 +73,16 @@ jobs:
           if [ -n "${SID}" ]; then
             HC_ARGS+=(--id "${SID}")
           fi
+          if [ -n "${SID}" ]; then
+            SERVICE_IDS="$(bun run scripts/list-deploy-service-ids.ts --id "${SID}")"
+          else
+            SERVICE_IDS="$(bun run scripts/list-deploy-service-ids.ts)"
+          fi
           echo "service_id=${SID}" >> "$GITHUB_OUTPUT"
+          echo "service_ids=${SERVICE_IDS}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "health_check_args=${HC_ARGS[*]}" >> "$GITHUB_OUTPUT"
-          echo "Deploy: service_id='${SID:-all}' image_tag='${TAG}'"
+          echo "Deploy: service_id='${SID:-all}' services=${SERVICE_IDS} image_tag='${TAG}'"
 
   make-ghcr-public:
     runs-on: ubuntu-latest
@@ -107,6 +95,7 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
+        secrets: inherit
       - run: bun run make-ghcr-public
         env:
           GH_TOKEN: ${{ github.token }}
@@ -122,6 +111,7 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
+        secrets: inherit
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Reconcile DNS
         env:
@@ -151,18 +141,23 @@ jobs:
           if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
           bun run sync-aliases "${ARGS[@]}"
 
-  fly-secrets:
+  fly-deploy:
     runs-on: ubuntu-latest
     needs: prepare
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        service_id: ${{ fromJson(needs.prepare.outputs.service_ids) }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
       - uses: ./.github/actions/vault-secrets
-        id: vault_secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
+        secrets: inherit
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Sync Fly secrets
         env:
@@ -173,24 +168,7 @@ jobs:
             echo "::warning::FLY_TOKEN not set — skipping sync-fly-secrets"
             exit 0
           fi
-          ARGS=()
-          if [ -n "${{ needs.prepare.outputs.service_id }}" ]; then
-            ARGS+=(--id "${{ needs.prepare.outputs.service_id }}")
-          fi
-          bun run sync-fly-secrets "${ARGS[@]}"
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: [prepare, fly-secrets]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
-      - uses: ./.github/actions/vault-secrets
-        with:
-          vault_addr: ${{ env.VAULT_ADDR }}
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+          bun run sync-fly-secrets --id "${{ matrix.service_id }}"
       - name: Deploy to Fly
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
@@ -201,16 +179,14 @@ jobs:
             echo "ERROR: FLY_TOKEN is required" >&2
             exit 1
           fi
-          ARGS=(--image-tag "${{ needs.prepare.outputs.image_tag }}" --continue-on-error)
-          if [ -n "${{ needs.prepare.outputs.service_id }}" ]; then
-            ARGS+=(--id "${{ needs.prepare.outputs.service_id }}")
-          fi
-          bun run deploy-fly "${ARGS[@]}"
+          bun run deploy-fly \
+            --id "${{ matrix.service_id }}" \
+            --image-tag "${{ needs.prepare.outputs.image_tag }}"
 
   health-check:
     runs-on: ubuntu-latest
-    needs: [prepare, deploy]
-    if: needs.deploy.result == 'success'
+    needs: [prepare, fly-deploy]
+    if: needs.fly-deploy.result == 'success'
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

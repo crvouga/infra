@@ -201,7 +201,7 @@ async function deployService(
     if (wait) {
       args.push("--wait-timeout", waitTimeout);
     } else {
-      args.push("--no-wait");
+      args.push("--detach");
     }
     return fly(...args);
   }

@@ -8,6 +8,45 @@ outputs:
   vault_available:
     description: "true when OIDC auth to Vault succeeded"
     value: ${{ steps.mark.outputs.vault_available }}
+secrets:
+  CLOUDFLARE_API_TOKEN:
+    required: false
+  CF_API_TOKEN:
+    required: false
+  CLOUDFLARE_ACCOUNT_ID:
+    required: false
+  TMDB_API_READ_ACCESS_TOKEN:
+    required: false
+  TWILIO_ACCOUNT_SID:
+    required: false
+  TWILIO_AUTH_TOKEN:
+    required: false
+  TWILIO_SERVICE_SID:
+    required: false
+  FLY_TOKEN:
+    required: false
+  GITHUB_TOKEN_SUPER:
+    required: false
+  VAULT_TOKEN:
+    required: false
+  DATABASE_URL:
+    required: false
+  S3_ENDPOINT:
+    required: false
+  S3_ACCESS_KEY:
+    required: false
+  S3_SECRET_KEY:
+    required: false
+  S3_BUCKET:
+    required: false
+  S3_REGION:
+    required: false
+  OPENAI_API_KEY:
+    required: false
+  NORMALIZER_APP_GOOGLE_CLIENT_ID:
+    required: false
+  NORMALIZER_APP_GOOGLE_CLIENT_SECRET:
+    required: false
 runs:
   using: composite
   steps:
@@ -78,7 +117,38 @@ runs:
     - name: GitHub repository secrets fallback
       if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome == 'failure'
       shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        TMDB_API_READ_ACCESS_TOKEN: ${{ secrets.TMDB_API_READ_ACCESS_TOKEN }}
+        TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+        TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+        TWILIO_SERVICE_SID: ${{ secrets.TWILIO_SERVICE_SID }}
+        FLY_TOKEN: ${{ secrets.FLY_TOKEN }}
+        GITHUB_TOKEN_SUPER: ${{ secrets.GITHUB_TOKEN_SUPER }}
+        VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+        S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+        S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+        S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        S3_REGION: ${{ secrets.S3_REGION }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        NORMALIZER_APP_GOOGLE_CLIENT_ID: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_ID }}
+        NORMALIZER_APP_GOOGLE_CLIENT_SECRET: ${{ secrets.NORMALIZER_APP_GOOGLE_CLIENT_SECRET }}
       run: bash "${{ github.action_path }}/fallback.sh"
+
+    - name: Normalize secret env aliases
+      shell: bash
+      run: |
+        if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -z "${CF_API_TOKEN:-}" ]; then
+          {
+            echo "CF_API_TOKEN<<EOF"
+            echo "${CLOUDFLARE_API_TOKEN}"
+            echo "EOF"
+          } >> "${GITHUB_ENV}"
+        fi
 
     - id: mark
       shell: bash
