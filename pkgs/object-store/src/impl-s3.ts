@@ -2,14 +2,19 @@ import { AwsClient } from 'aws4fetch';
 
 import { ObjectStoreWithPrefix } from './impl-with-prefix';
 import type { ObjectStore, StoredObject } from './interface';
+import { applyStoreKeyPrefix, validateStoreNamespace } from './object-key';
 import { s3PutObjectHeaders } from './s3-put-headers';
 
-export type ObjectStoreS3Config = {
+export type ObjectStoreS3ConnectionConfig = {
   readonly endpoint: string;
   readonly region: string;
   readonly accessKeyId: string;
   readonly secretAccessKey: string;
   readonly bucket: string;
+};
+
+export type ObjectStoreS3Config = ObjectStoreS3ConnectionConfig & {
+  readonly storeNamespace: string;
 };
 
 function encodeS3Key(key: string): string {
@@ -27,8 +32,11 @@ function encodeS3Key(key: string): string {
 export class ObjectStoreImplS3 implements ObjectStore {
   private readonly client: AwsClient;
   private readonly baseUrl: string;
+  private readonly storeNamespace: string;
 
   constructor(config: ObjectStoreS3Config) {
+    validateStoreNamespace(config.storeNamespace);
+    this.storeNamespace = config.storeNamespace;
     this.client = new AwsClient({
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
@@ -39,8 +47,12 @@ export class ObjectStoreImplS3 implements ObjectStore {
     this.baseUrl = `${endpoint}/${config.bucket}`;
   }
 
+  private resolveKey(key: string): string {
+    return applyStoreKeyPrefix(key, this.storeNamespace);
+  }
+
   private objectUrl(key: string): string {
-    return `${this.baseUrl}/${encodeS3Key(key)}`;
+    return `${this.baseUrl}/${encodeS3Key(this.resolveKey(key))}`;
   }
 
   async get(key: string): Promise<StoredObject | null> {

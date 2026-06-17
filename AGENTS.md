@@ -7,7 +7,7 @@
 
 ## Architecture
 
-Self-hosted Turborepo Remote Cache on the chrisvouga.dev origin stack (Docker + Bun). Artifacts live in Backblaze B2 via `@pkgs/object-store` (`ObjectStoreImplS3`). Runtime secrets load from Vault at boot.
+Self-hosted Turborepo Remote Cache on the chrisvouga.dev origin stack (Docker + Bun). Artifacts live in Backblaze B2 via `@pkgs/object-store` (`createS3ObjectStore` → `ObjectStoreImplS3`). Physical object keys are always `turbo-cache/prd/<artifact-hash>` in the shared bucket. Runtime secrets load from Vault at boot.
 
 CI publishes a **public** image to **GHCR** (`ghcr.io/crvouga/chrisvouga-turborepo:<sha>`); infra deploy-pipeline pulls and runs it. If the package is new, set GHCR visibility to public once in GitHub package settings.
 
@@ -15,10 +15,10 @@ CI publishes a **public** image to **GHCR** (`ghcr.io/crvouga/chrisvouga-turbore
 
 Canonical registry: [`scripts/vault-secrets-registry.ts`](scripts/vault-secrets-registry.ts)
 
-| Config | Purpose                                                         |
-| ------ | --------------------------------------------------------------- |
-| `dev`  | Local dev + CI (`check:vault-secrets`)                          |
-| `prd`  | Production deploy (`check:vault-secrets:prd`)                   |
+| Config | Purpose                                       |
+| ------ | --------------------------------------------- |
+| `dev`  | Local dev + CI (`check:vault-secrets`)        |
+| `prd`  | Production deploy (`check:vault-secrets:prd`) |
 
 Both configs must carry the same required keys. `bun run setup` runs `ensure-vault-secrets.ts` to write derived defaults (`TURBO_API`, `TURBO_TEAM`, `TURBO_CACHE`) into **dev** and **prd** when missing.
 

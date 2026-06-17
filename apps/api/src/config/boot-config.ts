@@ -1,7 +1,8 @@
+import { createS3ObjectStore } from '@pkgs/object-store/create-s3-object-store';
 import type { ObjectStore } from '@pkgs/object-store/interface';
-import { ObjectStoreImplS3 } from '@pkgs/object-store/impl-s3';
 import type { SecretStore } from '@pkgs/secret-store';
 
+import { CACHE_OBJECT_STORE_NAMESPACE } from '../config/object-store-namespace';
 import { CacheSecretName } from '../config/secret-names';
 
 export type CacheBootConfig = {
@@ -22,13 +23,16 @@ export async function loadCacheBootConfig(
       secretStore.getRequired(CacheSecretName.b2Bucket),
     ]);
 
-  const objectStore = new ObjectStoreImplS3({
-    endpoint: endpoint.readSecretValue(),
-    region: region.readSecretValue(),
-    accessKeyId: accessKeyId.readSecretValue(),
-    secretAccessKey: secretAccessKey.readSecretValue(),
-    bucket: bucket.readSecretValue(),
-  }).withPrefix('turbo-cache/');
+  const objectStore = createS3ObjectStore(
+    {
+      endpoint: endpoint.readSecretValue(),
+      region: region.readSecretValue(),
+      accessKeyId: accessKeyId.readSecretValue(),
+      secretAccessKey: secretAccessKey.readSecretValue(),
+      bucket: bucket.readSecretValue(),
+    },
+    CACHE_OBJECT_STORE_NAMESPACE
+  );
 
   return {
     turboToken: turboToken.readSecretValue(),

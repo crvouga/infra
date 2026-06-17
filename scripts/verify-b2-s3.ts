@@ -1,5 +1,6 @@
-import type { ObjectStoreS3Config } from '@pkgs/object-store/impl-s3';
-import { ObjectStoreImplS3 } from '@pkgs/object-store/impl-s3';
+import { CACHE_OBJECT_STORE_NAMESPACE } from '@apps/api/config/object-store-namespace';
+import { createS3ObjectStore } from '@pkgs/object-store/create-s3-object-store';
+import type { ObjectStoreS3ConnectionConfig } from '@pkgs/object-store/impl-s3';
 
 import { VaultSecretKey } from './vault-secrets-registry';
 
@@ -8,7 +9,7 @@ function readRequiredEnv(key: string): string | null {
   return value.length > 0 ? value : null;
 }
 
-export function readB2S3ConfigFromEnv(): ObjectStoreS3Config | null {
+export function readB2S3ConfigFromEnv(): ObjectStoreS3ConnectionConfig | null {
   const endpoint = readRequiredEnv(VaultSecretKey.b2S3Endpoint);
   const region = readRequiredEnv(VaultSecretKey.b2S3Region);
   const accessKeyId = readRequiredEnv(VaultSecretKey.b2S3AccessKeyId);
@@ -55,7 +56,7 @@ export async function verifyB2S3Credentials(): Promise<string | null> {
     return 'B2 S3 env vars are missing (B2_S3_ENDPOINT, B2_S3_REGION, B2_S3_ACCESS_KEY_ID, B2_S3_SECRET_ACCESS_KEY, B2_BUCKET).';
   }
 
-  const store = new ObjectStoreImplS3(config);
+  const store = createS3ObjectStore(config, CACHE_OBJECT_STORE_NAMESPACE);
   const probeKey = `credential-probe-${String(Date.now())}`;
   const probeBytes = new Uint8Array([0x53, 0x4d, 0x4b]); // "SMK"
 
@@ -76,7 +77,6 @@ export async function verifyB2S3Credentials(): Promise<string | null> {
     return formatB2ProbeError(message, config.bucket);
   }
 
-  //
   try {
     const stored = await store.get(probeKey);
     if (stored === null) {
