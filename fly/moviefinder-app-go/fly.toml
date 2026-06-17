@@ -23,7 +23,7 @@ primary_region = "iad"
     grace_period = "60s"
     interval = "15s"
     method = "GET"
-    path = "/"
+    path = "/health"
     protocol = "http"
     timeout = "10s"
 

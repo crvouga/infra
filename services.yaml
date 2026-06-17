@@ -32,8 +32,11 @@ services:
     build_context: .
     port: 9000
     health_check: true
+    health_path: /health
     env:
       PORT: "9000"
+      HOST: "0.0.0.0"
+      REPOSITORY_IMPLEMENTATION: fileSystem
     secrets:
       - name: DATABASE_URL
         source: literal
@@ -87,6 +90,7 @@ services:
     build_context: .
     port: 8080
     health_check: true
+    health_path: /health
     env:
       PORT: "8080"
     secrets: *moviefinder_secrets
