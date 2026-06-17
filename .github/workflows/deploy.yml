@@ -130,30 +130,13 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          chmod +x scripts/sync-dns.sh scripts/verify-custom-domain.sh
+          chmod +x scripts/sync-dns.sh scripts/verify-custom-domain.sh scripts/ensure-fly-cert.sh
           ./scripts/sync-dns.sh
 
       - name: Ensure TLS certificate
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          flyctl certs add vault.chrisvouga.dev --config fly.toml 2>/dev/null || true
-          for attempt in $(seq 1 12); do
-            echo "==> Checking TLS certificate (attempt ${attempt}/12)..."
-            STATUS="$(flyctl certs list --config fly.toml --json | jq -r '.[] | select(.hostname=="vault.chrisvouga.dev") | .status')"
-            CONFIGURED="$(flyctl certs list --config fly.toml --json | jq -r '.[] | select(.hostname=="vault.chrisvouga.dev") | .configured')"
-            if [ "${CONFIGURED}" = "true" ] && [ "${STATUS}" = "Ready" ]; then
-              flyctl certs check vault.chrisvouga.dev --config fly.toml
-              echo "==> TLS certificate ready"
-              exit 0
-            fi
-            flyctl certs check vault.chrisvouga.dev --config fly.toml || true
-            sleep 15
-          done
-          echo "ERROR: TLS certificate for vault.chrisvouga.dev is not Ready" >&2
-          flyctl certs list --config fly.toml
-          exit 1
+        run: ./scripts/ensure-fly-cert.sh
 
       - name: Verify custom domain (pre-unseal)
         env:

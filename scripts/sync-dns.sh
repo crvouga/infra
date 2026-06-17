@@ -145,6 +145,25 @@ if [ "$CF_CNAME" != "$CNAME_TARGET" ] || [ "$CF_PROXIED" != "true" ]; then
 fi
 echo "==> Cloudflare CNAME verified"
 
+if [ -n "$OWNERSHIP_NAME" ] && [ -n "$OWNERSHIP_VALUE" ]; then
+  echo "==> Waiting for ownership TXT propagation (1.1.1.1)..."
+  OWNERSHIP_VISIBLE=""
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    RESOLVED_TXT="$(dig +short TXT "${OWNERSHIP_NAME}" @1.1.1.1 2>/dev/null | tr -d '"' | head -n1 || true)"
+    if [ "$RESOLVED_TXT" = "$OWNERSHIP_VALUE" ]; then
+      OWNERSHIP_VISIBLE=1
+      echo "==> Ownership TXT visible: ${OWNERSHIP_NAME}=${OWNERSHIP_VALUE}"
+      break
+    fi
+    echo "  attempt ${attempt}/12 — TXT not visible yet, waiting 10s..."
+    sleep 10
+  done
+  if [ -z "$OWNERSHIP_VISIBLE" ]; then
+    echo "ERROR: ${OWNERSHIP_NAME} TXT not visible on 1.1.1.1" >&2
+    exit 1
+  fi
+fi
+
 echo "==> Waiting for public DNS propagation (1.1.1.1)..."
 RESOLVED=""
 for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do

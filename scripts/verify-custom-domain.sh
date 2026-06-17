@@ -84,20 +84,18 @@ check_cert() {
     echo "WARNING: flyctl not available — skipping cert check" >&2
     return 0
   fi
-  local configured status
-  configured="$(flyctl certs list --app "${FLY_APP}" --json | jq -r --arg h "$HOSTNAME" '.[] | select(.hostname==$h) | .configured')"
-  status="$(flyctl certs list --app "${FLY_APP}" --json | jq -r --arg h "$HOSTNAME" '.[] | select(.hostname==$h) | .status')"
-  if [ "${configured}" != "true" ]; then
-    echo "ERROR: Fly TLS cert for ${HOSTNAME} is not configured (status=${status:-missing})" >&2
-    flyctl certs list --app "${FLY_APP}" || true
-    return 1
+  local cert configured status active
+  cert="$(flyctl certs show "${HOSTNAME}" --app "${FLY_APP}" --json)"
+  configured="$(echo "$cert" | jq -r '.configured // false')"
+  status="$(echo "$cert" | jq -r '.status // empty')"
+  active="$(echo "$cert" | jq -r '.certificates[0].status // empty')"
+  if [ "${configured}" = "true" ] && { [ "${status}" = "Ready" ] || [ "${active}" = "active" ]; }; then
+    echo "==> Fly TLS cert OK (${HOSTNAME}, status=${status}, active=${active:-none})"
+    return 0
   fi
-  if [ "${status}" != "Ready" ]; then
-    echo "ERROR: Fly TLS cert for ${HOSTNAME} is not Ready (status=${status})" >&2
-    flyctl certs check "${HOSTNAME}" --app "${FLY_APP}" || true
-    return 1
-  fi
-  echo "==> Fly TLS cert OK (${HOSTNAME}, status=${status})"
+  echo "ERROR: Fly TLS cert for ${HOSTNAME} is not ready (configured=${configured}, status=${status}, active=${active:-none})" >&2
+  flyctl certs check "${HOSTNAME}" --app "${FLY_APP}" || true
+  return 1
 }
 
 check_https() {
