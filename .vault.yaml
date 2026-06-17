@@ -1,5 +1,4 @@
 addr: https://vault.chrisvouga.dev
-mount: secret
+mount: doppler
 project: personal
-# default; use prd for production commands
 config: dev

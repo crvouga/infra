@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
+
 import { AwsClient } from 'aws4fetch';
 
 import { ObjectStoreWithPrefix } from './impl-with-prefix';
 import type { ObjectStore, StoredObject } from './interface';
+import { s3PutObjectHeaders } from './s3-put-headers';
 
 export type ObjectStoreS3Config = {
   readonly endpoint: string;
@@ -70,7 +73,7 @@ export class ObjectStoreImplS3 implements ObjectStore {
     const response = await this.client.fetch(this.objectUrl(key), {
       method: 'PUT',
       body: bytes as unknown as BodyInit,
-      headers: { 'Content-Type': contentType },
+      headers: s3PutObjectHeaders(bytes, contentType),
     });
     if (!response.ok) {
       throw new Error(`S3 PUT ${key} failed: HTTP ${String(response.status)}`);
