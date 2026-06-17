@@ -210,8 +210,6 @@ services:
       VAULT_ADDR: "https://vault.chrisvouga.dev"
       VAULT_PROJECT: "personal"
       VAULT_CONFIG: "prd"
-    depends_on:
-      - vault
     secrets:
       - name: VAULT_TOKEN
         source: vault

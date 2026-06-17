@@ -16,6 +16,7 @@ import {
   flyAppName,
   flyAppHostname,
   loadServicesConfig,
+  standaloneVaultHostname,
   type DnsTarget,
   type ServicesConfig,
 } from "../lib/services.js";
@@ -217,6 +218,7 @@ async function planActions(
 
   if (args.pruneOrphans) {
     const originHostname = `origin.${config.zone}`;
+    const excludedHostnames = new Set([standaloneVaultHostname(config)]);
     for (const r of records) {
       if (r.name === originHostname && r.type === "A") {
         actions.push({
@@ -228,6 +230,7 @@ async function planActions(
       }
       if (!["CNAME", "A", "AAAA"].includes(r.type)) continue;
       if (desiredNames.has(r.name)) continue;
+      if (excludedHostnames.has(r.name)) continue;
       if (!r.name.endsWith(config.zone) && !r.name.includes(`.${config.zone}`)) continue;
       if (r.type === "CNAME" && !r.content.endsWith(".fly.dev")) continue;
       actions.push({

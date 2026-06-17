@@ -2,7 +2,7 @@ name: Deploy Pipeline
 
 # Fly.io stack — fully automated via GitHub Actions.
 #
-#   prepare → dns-sync → make-ghcr-public → fly-deploy (matrix) → health-check
+#   prepare → dns-sync → make-ghcr-public → fly-deploy (matrix: deploy + health-check per service)
 #
 # Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
 #
@@ -59,7 +59,6 @@ jobs:
       service_id: ${{ steps.resolve.outputs.service_id }}
       service_ids: ${{ steps.resolve.outputs.service_ids }}
       image_tag: ${{ steps.resolve.outputs.image_tag }}
-      health_check_args: ${{ steps.resolve.outputs.health_check_args }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -71,10 +70,6 @@ jobs:
           set -euo pipefail
           SID="${SERVICE_ID}"
           TAG="${IMAGE_TAG}"
-          HC_ARGS=()
-          if [ -n "${SID}" ]; then
-            HC_ARGS+=(--id "${SID}")
-          fi
           if [ -n "${SID}" ]; then
             SERVICE_IDS="$(bun run scripts/list-deploy-service-ids.ts --id "${SID}")"
           else
@@ -83,7 +78,6 @@ jobs:
           echo "service_id=${SID}" >> "$GITHUB_OUTPUT"
           echo "service_ids=${SERVICE_IDS}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "health_check_args=${HC_ARGS[*]}" >> "$GITHUB_OUTPUT"
           echo "Deploy: service_id='${SID:-all}' services=${SERVICE_IDS} image_tag='${TAG}'"
 
   make-ghcr-public:
@@ -182,16 +176,6 @@ jobs:
             --id "${{ matrix.service_id }}" \
             --image-tag "${{ needs.prepare.outputs.image_tag }}"
 
-  health-check:
-    runs-on: ubuntu-latest
-    needs: [prepare, fly-deploy]
-    if: needs.fly-deploy.result == 'success'
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - name: Health-check services
-        run: |
-          set -euo pipefail
-          ARGS=(${{ needs.prepare.outputs.health_check_args }})
-          bun run health-check "${ARGS[@]}"
+      - name: Health-check service
+        if: success()
+        run: bun run health-check --id "${{ matrix.service_id }}"

@@ -74,6 +74,11 @@ export function vaultAddr(config: ServicesConfig): string {
   return `https://vault.${config.zone}`;
 }
 
+/** Hostname for the standalone vault project (crvouga/vault); infra must not manage or prune its DNS. */
+export function standaloneVaultHostname(config: ServicesConfig): string {
+  return `vault.${config.zone}`;
+}
+
 export function flyOrg(config: ServicesConfig): string {
   const org = config.fly?.org?.trim();
   if (!org) throw new Error("services.yaml: fly.org is required");
