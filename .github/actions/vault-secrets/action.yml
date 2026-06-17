@@ -1,5 +1,5 @@
 name: Vault secrets (OIDC)
-description: Authenticate to OpenBao via GitHub OIDC and export CI secrets; retry on failure and fall back to GitHub repo secrets.
+description: Authenticate to OpenBao via GitHub OIDC and export CI secrets from Vault.
 inputs:
   vault_config:
     description: "Vault config path segment (dev or prd)"
@@ -59,17 +59,13 @@ runs:
           secret/data/personal/${{ inputs.vault_config }} B2_BUCKET | B2_BUCKET ;
           secret/data/personal/${{ inputs.vault_config }} VAULT_TOKEN | VAULT_TOKEN
 
-    - name: GitHub repository secrets fallback
-      if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome == 'failure'
+    - name: Require Vault OIDC
+      if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome != 'success'
       shell: bash
-      run: bash "${{ github.action_path }}/fallback.sh"
+      run: |
+        echo "::error::Failed to load secrets from Vault at https://vault.chrisvouga.dev via OIDC"
+        exit 1
 
     - id: mark
       shell: bash
-      run: |
-        if [ "${{ steps.vault_core.outcome }}" = "success" ] || [ "${{ steps.vault_core_retry.outcome }}" = "success" ]; then
-          echo "vault_available=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "vault_available=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::Vault OIDC unavailable — using GitHub repository secrets fallback"
-        fi
+      run: echo "vault_available=true" >> "$GITHUB_OUTPUT"

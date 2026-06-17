@@ -1,4 +1,6 @@
 # CI checks on every push/PR. Image publish is in publish-image.yml; deploy is via chrisvouga.dev.
+#
+# Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
 name: Deployment Pipeline
 
 permissions:
@@ -18,17 +20,6 @@ jobs:
       group: check-${{ github.workflow }}-${{ github.head_ref || github.ref || github.run_id }}
       cancel-in-progress: true
     timeout-minutes: 20
-    env:
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_API: ${{ secrets.TURBO_API }}
-      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
-      TURBO_CACHE: ${{ secrets.TURBO_CACHE }}
-      B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
-      B2_S3_REGION: ${{ secrets.B2_S3_REGION }}
-      B2_S3_ACCESS_KEY_ID: ${{ secrets.B2_S3_ACCESS_KEY_ID }}
-      B2_S3_SECRET_ACCESS_KEY: ${{ secrets.B2_S3_SECRET_ACCESS_KEY }}
-      B2_BUCKET: ${{ secrets.B2_BUCKET }}
-      VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -54,17 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 10
-    env:
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_API: ${{ secrets.TURBO_API }}
-      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
-      TURBO_CACHE: ${{ secrets.TURBO_CACHE }}
-      B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
-      B2_S3_REGION: ${{ secrets.B2_S3_REGION }}
-      B2_S3_ACCESS_KEY_ID: ${{ secrets.B2_S3_ACCESS_KEY_ID }}
-      B2_S3_SECRET_ACCESS_KEY: ${{ secrets.B2_S3_SECRET_ACCESS_KEY }}
-      B2_BUCKET: ${{ secrets.B2_BUCKET }}
-      VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
