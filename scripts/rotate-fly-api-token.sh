@@ -121,7 +121,8 @@ if [ -z "$NEW_TOKEN" ]; then
     --config "$FLY_TOML" 2>/dev/null)"
 fi
 
-NEW_TOKEN="$(printf '%s' "$NEW_TOKEN" | tr -d '[:space:]')"
+# Trim leading/trailing whitespace only — FlyV1 tokens contain an internal space.
+NEW_TOKEN="$(printf '%s' "$NEW_TOKEN" | sed -E 's/^[[:space:]]+//;s/[[:space:]]+$//')"
 
 if [ -z "$NEW_TOKEN" ]; then
   echo "ERROR: flyctl returned an empty token." >&2
