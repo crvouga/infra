@@ -24,44 +24,6 @@ services:
     port: 80
     health_check: true
 
-  - id: pickflix
-    hostname: pickflix.chrisvouga.dev
-    github_repo: crvouga/pickflix-v1
-    source_code_url: https://github.com/crvouga/pickflix-v1
-    dockerfile: ./Dockerfile
-    build_context: .
-    port: 9000
-    health_check: true
-    health_path: /health
-    env:
-      PORT: "9000"
-      HOST: "0.0.0.0"
-      REPOSITORY_IMPLEMENTATION: fileSystem
-    secrets:
-      - name: DATABASE_URL
-        source: literal
-        value: noop
-      - name: PORT
-        source: literal
-        value: "9000"
-      - name: SECRET
-        source: literal
-        value: noop
-      - name: SEND_GRID_API_KEY
-        source: literal
-        value: noop
-      - name: SEND_GRID_REGISTERED_EMAIL_ADDRESS
-        source: literal
-        value: noop
-      - name: SESSION_COOKIE_SECRET
-        source: literal
-        value: noop
-      - name: YOUTUBE_API_KEY
-        source: literal
-        value: noop
-      - name: TMDB_API_READ_ACCESS_TOKEN
-        source: vault
-
   - id: moviefinder-app-rust
     hostname: moviefinder-app-rust.chrisvouga.dev
     github_repo: crvouga/moviefinder.app-rust
@@ -83,19 +45,6 @@ services:
         source: vault
       - name: TWILIO_SERVICE_SID
         source: vault
-
-  - id: moviefinder-app-go
-    hostname: moviefinder-app-go.chrisvouga.dev
-    github_repo: crvouga/moviefinder.app-go
-    source_code_url: https://github.com/crvouga/moviefinder.app-go
-    dockerfile: ./Dockerfile
-    build_context: .
-    port: 8080
-    health_check: true
-    health_path: /health
-    env:
-      PORT: "8080"
-    secrets: *moviefinder_secrets
 
   - id: moviefinder-app-react
     hostname: moviefinder-app-react.chrisvouga.dev

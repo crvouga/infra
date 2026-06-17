@@ -4,7 +4,7 @@
  *
  * Usage:
  *   bun run scripts/sync-fly-secrets.ts
- *   bun run scripts/sync-fly-secrets.ts --id pickflix
+ *   bun run scripts/sync-fly-secrets.ts --id portfolio
  */
 import { $ } from "bun";
 import {

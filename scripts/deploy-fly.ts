@@ -7,7 +7,7 @@
  *
  * Usage:
  *   bun run scripts/deploy-fly.ts
- *   bun run scripts/deploy-fly.ts --id pickflix
+ *   bun run scripts/deploy-fly.ts --id portfolio
  *   bun run scripts/deploy-fly.ts --continue-on-error
  */
 import { existsSync } from "node:fs";

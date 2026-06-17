@@ -12,7 +12,7 @@
 #         contents: read
 #         packages: write
 #       with:
-#         service_id: pickflix
+#         service_id: portfolio
 #         dockerfile: ./Dockerfile
 #         context: .
 #         image_prefix: chrisvouga-dev
@@ -24,7 +24,7 @@ on:
   workflow_call:
     inputs:
       service_id:
-        description: "Service id matching services.yaml (e.g. pickflix, portfolio)."
+        description: "Service id matching services.yaml (e.g. portfolio, todo-app)."
         required: true
         type: string
       dockerfile:

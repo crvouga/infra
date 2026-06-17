@@ -2,7 +2,7 @@
 
 Fly.io deployment for all services on the zone defined in [`services.yaml`](services.yaml) (`zone: chrisvouga.dev`).
 
-Each project repo builds and pushes its own public image to `ghcr.io/<image_owner>/<zone-slug>-<id>` (e.g. `ghcr.io/crvouga/chrisvouga-dev-pickflix`). This repo **only consumes those images** — GitHub Actions syncs DNS/secrets, deploys to Fly, and health-checks.
+Each project repo builds and pushes its own public image to `ghcr.io/<image_owner>/<zone-slug>-<id>` (e.g. `ghcr.io/crvouga/chrisvouga-portfolio`). This repo **only consumes those images** — GitHub Actions syncs DNS/secrets, deploys to Fly, and health-checks.
 
 Cloudflare terminates TLS at the edge (proxied DNS, Full strict). Fly apps run in region `iad`.
 
@@ -118,7 +118,7 @@ Sibling repos dispatch `deploy-service` with `{ id, image_tag }` after publishin
 Manual single-service deploy:
 
 ```bash
-gh workflow run deploy-pipeline.yml -f service_id=pickflix -f image_tag=abc123
+gh workflow run deploy-pipeline.yml -f service_id=portfolio -f image_tag=abc123
 ```
 
 ## Local scripts

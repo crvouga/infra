@@ -4,7 +4,7 @@
  *
  * Usage:
  *   bun run scripts/list-deploy-service-ids.ts
- *   bun run scripts/list-deploy-service-ids.ts --id pickflix
+ *   bun run scripts/list-deploy-service-ids.ts --id portfolio
  */
 import {
   deployableServices,

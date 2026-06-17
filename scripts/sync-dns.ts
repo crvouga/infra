@@ -7,7 +7,7 @@
  * Usage:
  *   bun run scripts/sync-dns.ts
  *   bun run scripts/sync-dns.ts --apply
- *   bun run scripts/sync-dns.ts --id pickflix --apply
+ *   bun run scripts/sync-dns.ts --id portfolio --apply
  */
 import { $ } from "bun";
 import { CloudflareApi, cloudflareCredentialsFromEnv, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
