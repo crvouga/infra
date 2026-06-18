@@ -47,6 +47,8 @@ jobs:
         run: bun run setup-pgweb-filestash --app pgweb
 
       - name: Deploy pgweb
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run deploy-pgweb-filestash --app pgweb
 
   deploy-filestash:
@@ -71,4 +73,6 @@ jobs:
         run: bun run setup-pgweb-filestash --app filestash
 
       - name: Deploy filestash
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run deploy-pgweb-filestash --app filestash

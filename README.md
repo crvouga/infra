@@ -165,7 +165,7 @@ Two admin tools live in this repo with their own Dockerfiles and deploy workflow
 **Deploy is fully automated** via [`.github/workflows/deploy-pgweb-filestash.yml`](.github/workflows/deploy-pgweb-filestash.yml) on push to `main` (or manual dispatch). Each run:
 
 1. Authenticates to Vault via OIDC (same as deploy-pipeline)
-2. Runs idempotent setup (`bun run setup-pgweb-filestash`) — seeds missing Vault keys, creates Fly apps/certs/volume, syncs runtime secrets, mints deploy tokens, updates GitHub secrets, reconciles Cloudflare DNS
+2. Runs idempotent setup (`bun run setup-pgweb-filestash`) — seeds missing Vault keys, creates Fly apps/IPs/certs/volume, syncs runtime secrets, reconciles Cloudflare DNS
 3. Deploys with `flyctl deploy --remote-only`
 
 ### What setup automates
@@ -174,11 +174,12 @@ Two admin tools live in this repo with their own Dockerfiles and deploy workflow
 |------|----------|
 | Vault `PGWEB_AUTH_USER` / `PGWEB_AUTH_PASS` | Generated and patched to `secret/personal/prd` if missing |
 | Vault `FILESTASH_ADMIN_PASSWORD` | Generated and patched if missing; synced to Fly as `ADMIN_PASSWORD` |
-| Fly apps + TLS certs | Created if missing |
+| Fly apps + TLS certs + shared IPv4 | Created if missing |
 | Filestash volume `filestash_data` | Created in `iad` if missing |
-| Runtime Fly secrets | `VAULT_ADDR` + long-lived `VAULT_TOKEN` from Vault prd |
-| Deploy tokens | Minted once, stored in Vault (`FLY_API_TOKEN_PGWEB` / `FLY_API_TOKEN_FILESTASH`) and GitHub secrets |
+| Runtime Fly secrets | `VAULT_ADDR`, `VAULT_TOKEN`, pgweb auth, Filestash `ADMIN_PASSWORD` |
 | DNS | CNAME `*.chrisvouga.dev` → `<app>.fly.dev` via Cloudflare API |
+
+Deploy uses the org-wide `FLY_TOKEN` from Vault (same as deploy-pipeline).
 
 ### Prerequisites (org-wide, already required by deploy-pipeline)
 

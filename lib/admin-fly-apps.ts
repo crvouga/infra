@@ -5,9 +5,6 @@ export type AdminFlyAppSpec = {
   readonly flyApp: string;
   readonly hostname: string;
   readonly flyConfig: string;
-  readonly deployTokenVaultKey: string;
-  readonly deployTokenGhSecret: string;
-  readonly runtimeFlySecrets: readonly string[];
   readonly volume?: {
     readonly name: string;
     readonly sizeGb: number;
@@ -25,18 +22,12 @@ export function adminFlyApps(config: ServicesConfig = loadServicesConfig()): rea
       flyApp: PGWEB_APP,
       hostname: `pgweb.${zone}`,
       flyConfig: "pgweb/fly.toml",
-      deployTokenVaultKey: "FLY_API_TOKEN_PGWEB",
-      deployTokenGhSecret: "FLY_API_TOKEN_PGWEB",
-      runtimeFlySecrets: ["VAULT_ADDR", "VAULT_TOKEN", "PGWEB_AUTH_USER", "PGWEB_AUTH_PASS"],
     },
     {
       id: "filestash",
       flyApp: FILESTASH_APP,
       hostname: `filestash.${zone}`,
       flyConfig: "filestash/fly.toml",
-      deployTokenVaultKey: "FLY_API_TOKEN_FILESTASH",
-      deployTokenGhSecret: "FLY_API_TOKEN_FILESTASH",
-      runtimeFlySecrets: ["VAULT_ADDR", "VAULT_TOKEN", "ADMIN_PASSWORD"],
       volume: { name: "filestash_data", sizeGb: 1 },
     },
   ];

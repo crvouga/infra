@@ -8,6 +8,7 @@
  */
 import { $ } from "bun";
 import { findAdminFlyApp } from "../lib/admin-fly-apps.js";
+import { requireFlyApiToken } from "../lib/fly-token.js";
 import { loadServicesConfig } from "../lib/services.js";
 
 function parseArgs(argv: readonly string[]): string {
@@ -39,18 +40,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const token =
-    process.env[app.deployTokenGhSecret]?.trim() ||
-    process.env[app.deployTokenVaultKey]?.trim() ||
-    process.env.FLY_TOKEN?.trim() ||
-    process.env.FLY_API_TOKEN?.trim();
-  if (!token) {
-    throw new Error(
-      `${app.deployTokenGhSecret}, FLY_TOKEN, or FLY_API_TOKEN is required (run setup-pgweb-filestash first)`,
-    );
-  }
-
-  process.env.FLY_API_TOKEN = token;
+  const token = requireFlyApiToken();
 
   console.log(`Deploying ${app.id} (${app.flyApp})...`);
   const result = await $`flyctl deploy --config ${app.flyConfig} --remote-only`

@@ -8,7 +8,6 @@
  *   bun run setup-pgweb-filestash --app filestash --dry-run
  */
 import { randomBytes } from "node:crypto";
-import { appendFileSync } from "node:fs";
 import { $ } from "bun";
 import {
   adminFlyApps,
@@ -20,10 +19,9 @@ import {
 } from "../lib/admin-fly-apps.js";
 import { CloudflareApi, cloudflareCredentialsFromEnv } from "../lib/cloudflare-api.js";
 import { requireFlyApiToken } from "../lib/fly-token.js";
-import { infraGithubRepo, loadServicesConfig } from "../lib/services.js";
+import { loadServicesConfig } from "../lib/services.js";
 import { vaultKvGet, vaultKvPatch } from "../lib/vault-kv.js";
 
-const TOKEN_EXPIRY = "999999h";
 const VAULT_RUNTIME_TOKEN_KEY = "VAULT_TOKEN";
 const FILESTASH_ADMIN_VAULT_KEY = "FILESTASH_ADMIN_PASSWORD";
 
@@ -73,13 +71,6 @@ function parseArgs(argv: readonly string[]): Args {
 
 function randomSecret(bytes = 24): string {
   return randomBytes(bytes).toString("base64url");
-}
-
-function exportGithubEnv(key: string, value: string): void {
-  const path = process.env.GITHUB_ENV?.trim();
-  if (!path) return;
-  const delimiter = `GHENV_${key}_${randomBytes(8).toString("hex")}`;
-  appendFileSync(path, `${key}<<${delimiter}\n${value}\n${delimiter}\n`);
 }
 
 async function fly(...args: string[]): Promise<{ ok: boolean; detail: string; stdout: string }> {
@@ -152,6 +143,26 @@ async function ensureFlyApp(app: AdminFlyAppSpec, org: string, dryRun: boolean):
   const created = await fly("apps", "create", app.flyApp, "--org", org, "--yes");
   if (!created.ok) throw new Error(`flyctl apps create (${app.flyApp}) failed: ${created.detail}`);
   console.log(`  ${app.id}: created Fly app ${app.flyApp}`);
+}
+
+async function ensureFlyIps(app: AdminFlyAppSpec, dryRun: boolean): Promise<void> {
+  const list = await fly("ips", "list", "--app", app.flyApp, "--json");
+  if (!list.ok) throw new Error(`flyctl ips list (${app.flyApp}) failed: ${list.detail}`);
+
+  const ips = JSON.parse(list.stdout) as Array<{ Address?: string; address?: string }>;
+  if (ips.length > 0) {
+    console.log(`  ${app.id}: public IPs allocated`);
+    return;
+  }
+
+  if (dryRun) {
+    console.log(`[dry-run] Would allocate shared IPv4 on ${app.flyApp}`);
+    return;
+  }
+
+  const v4 = await fly("ips", "allocate-v4", "--shared", "--app", app.flyApp, "--yes");
+  if (!v4.ok) throw new Error(`flyctl ips allocate-v4 (${app.flyApp}) failed: ${v4.detail}`);
+  console.log(`  ${app.id}: allocated shared IPv4`);
 }
 
 async function ensureFlyCert(app: AdminFlyAppSpec, dryRun: boolean): Promise<void> {
@@ -262,90 +273,6 @@ async function ensureFlyRuntimeSecrets(
   console.log(`  ${app.id}: synced runtime secrets on ${app.flyApp}`);
 }
 
-async function mintDeployToken(app: AdminFlyAppSpec, dryRun: boolean): Promise<string> {
-  if (dryRun) return "dry-run-deploy-token";
-
-  const result = await fly(
-    "tokens",
-    "create",
-    "deploy",
-    "--app",
-    app.flyApp,
-    "-x",
-    TOKEN_EXPIRY,
-    "-n",
-    `gha-${app.id}`,
-    "-j",
-  );
-  if (!result.ok) {
-    throw new Error(`flyctl tokens create deploy (${app.flyApp}) failed: ${result.detail}`);
-  }
-
-  const body = JSON.parse(result.stdout) as Record<string, unknown>;
-  const token =
-    (typeof body.token === "string" && body.token) ||
-    (typeof body.Token === "string" && body.Token) ||
-    "";
-  if (!token) throw new Error(`flyctl did not return deploy token JSON for ${app.flyApp}`);
-  return token;
-}
-
-async function ensureDeployToken(
-  app: AdminFlyAppSpec,
-  vaultData: Record<string, string>,
-  dryRun: boolean,
-): Promise<string> {
-  let token = vaultData[app.deployTokenVaultKey]?.trim();
-  if (!token) {
-    console.log(`  ${app.id}: minting deploy token...`);
-    token = await mintDeployToken(app, dryRun);
-    if (!dryRun) {
-      try {
-        await vaultKvPatch({ [app.deployTokenVaultKey]: token });
-        console.log(`  ${app.id}: stored ${app.deployTokenVaultKey} in Vault prd`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`  ${app.id}: Vault patch for deploy token skipped (${msg})`);
-      }
-    }
-  } else {
-    console.log(`  ${app.id}: deploy token already in Vault (${app.deployTokenVaultKey})`);
-  }
-  return token;
-}
-
-async function ensureGithubSecret(name: string, value: string, dryRun: boolean): Promise<void> {
-  const repo = infraGithubRepo(loadServicesConfig());
-  if (dryRun) {
-    console.log(`[dry-run] Would set GitHub secret ${name} on ${repo}`);
-    return;
-  }
-
-  const ghToken =
-    process.env.GITHUB_TOKEN_SUPER?.trim() ||
-    process.env.GH_TOKEN?.trim() ||
-    process.env.GITHUB_TOKEN?.trim();
-
-  const gh = await $`gh auth status`
-    .env({ ...process.env, ...(ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {}) })
-    .quiet()
-    .nothrow();
-  if (gh.exitCode !== 0) {
-    console.warn(`  GitHub: skipping secret ${name} sync (gh not authenticated)`);
-    return;
-  }
-
-  try {
-    await $`gh secret set ${name} --repo ${repo} --body ${value}`
-      .env({ ...process.env, ...(ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {}) })
-      .quiet();
-    console.log(`  GitHub: synced secret ${name} on ${repo}`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`  GitHub: could not set secret ${name} (${msg}) — using GITHUB_ENV for this run`);
-  }
-}
-
 async function ensureDns(
   apps: readonly AdminFlyAppSpec[],
   dryRun: boolean,
@@ -411,13 +338,13 @@ async function setupApp(
   region: string,
   vaultAddrValue: string,
   dryRun: boolean,
-): Promise<string> {
+): Promise<void> {
   console.log(`\n=== ${app.id} ===`);
   await ensureFlyApp(app, org, dryRun);
+  await ensureFlyIps(app, dryRun);
   await ensureFlyCert(app, dryRun);
   await ensureVolume(app, region, dryRun);
   await ensureFlyRuntimeSecrets(app, vaultData, vaultAddrValue, dryRun);
-  return ensureDeployToken(app, vaultData, dryRun);
 }
 
 async function main(): Promise<void> {
@@ -433,21 +360,8 @@ async function main(): Promise<void> {
 
   const vaultData = await ensureVaultBootstrapSecrets(args.dryRun);
 
-  const deployTokens: Record<string, string> = {};
   for (const app of args.apps) {
-    deployTokens[app.deployTokenGhSecret] = await setupApp(
-      app,
-      vaultData,
-      org,
-      region,
-      vaultAddrValue,
-      args.dryRun,
-    );
-  }
-
-  for (const [secretName, token] of Object.entries(deployTokens)) {
-    await ensureGithubSecret(secretName, token, args.dryRun);
-    exportGithubEnv(secretName, token);
+    await setupApp(app, vaultData, org, region, vaultAddrValue, args.dryRun);
   }
 
   if (!args.skipDns) {
