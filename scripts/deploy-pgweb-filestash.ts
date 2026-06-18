@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   const appDir = join(process.cwd(), dirname(app.flyConfig));
 
   console.log(`Deploying ${app.id} (${app.flyApp}) from ${appDir}...`);
-  const result = await $`flyctl deploy --config fly.toml --remote-only`
+  const result = await $`flyctl deploy --config fly.toml --remote-only --detach --ha=false --yes`
     .cwd(appDir)
     .env({ ...process.env, FLY_API_TOKEN: token })
     .nothrow();
