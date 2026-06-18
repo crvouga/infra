@@ -23,7 +23,6 @@ concurrency:
 permissions:
   id-token: write
   contents: read
-  secrets: write
 
 jobs:
   deploy-pgweb:
