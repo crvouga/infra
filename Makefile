@@ -29,3 +29,6 @@ check-database-url:
 
 clone-prod-db-to-dev:
 	./scripts/vault-run.sh -- ./scripts/clone-prod-database-to-dev.sh
+
+clear-legacy-b2-bucket:
+	./scripts/vault-run.sh -- ./scripts/clear-legacy-b2-bucket.sh
