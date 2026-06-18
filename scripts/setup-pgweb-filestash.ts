@@ -1,0 +1,464 @@
+#!/usr/bin/env bun
+/**
+ * Idempotent Fly + Vault + DNS setup for pgweb and filestash admin apps.
+ *
+ * Usage:
+ *   bun run setup-pgweb-filestash
+ *   bun run setup-pgweb-filestash --app pgweb
+ *   bun run setup-pgweb-filestash --app filestash --dry-run
+ */
+import { randomBytes } from "node:crypto";
+import { appendFileSync } from "node:fs";
+import { $ } from "bun";
+import {
+  adminFlyApps,
+  adminFlyOrg,
+  adminFlyRegion,
+  adminVaultAddr,
+  findAdminFlyApp,
+  type AdminFlyAppSpec,
+} from "../lib/admin-fly-apps.js";
+import { CloudflareApi, cloudflareCredentialsFromEnv } from "../lib/cloudflare-api.js";
+import { requireFlyApiToken } from "../lib/fly-token.js";
+import { infraGithubRepo, loadServicesConfig } from "../lib/services.js";
+import { vaultKvGet, vaultKvPatch } from "../lib/vault-kv.js";
+
+const TOKEN_EXPIRY = "999999h";
+const VAULT_RUNTIME_TOKEN_KEY = "VAULT_TOKEN";
+const FILESTASH_ADMIN_VAULT_KEY = "FILESTASH_ADMIN_PASSWORD";
+
+type Args = {
+  readonly apps: readonly AdminFlyAppSpec[];
+  readonly dryRun: boolean;
+  readonly skipDns: boolean;
+};
+
+function parseArgs(argv: readonly string[]): Args {
+  const config = loadServicesConfig();
+  let dryRun = false;
+  let skipDns = false;
+  const ids: string[] = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--app") ids.push(argv[++i] ?? "");
+    else if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--skip-dns") skipDns = true;
+    else if (arg === "--help" || arg === "-h") {
+      console.log(
+        "Usage: bun run setup-pgweb-filestash [--app pgweb|filestash] [--dry-run] [--skip-dns]",
+      );
+      process.exit(0);
+    } else {
+      console.error(`Unknown argument: ${arg}`);
+      process.exit(2);
+    }
+  }
+
+  const all = adminFlyApps(config);
+  const apps =
+    ids.length === 0
+      ? all
+      : ids.map((id) => {
+          const app = findAdminFlyApp(id, config);
+          if (!app) {
+            console.error(`Unknown admin app "${id}" (expected pgweb or filestash)`);
+            process.exit(1);
+          }
+          return app;
+        });
+
+  return { apps, dryRun, skipDns };
+}
+
+function randomSecret(bytes = 24): string {
+  return randomBytes(bytes).toString("base64url");
+}
+
+function exportGithubEnv(key: string, value: string): void {
+  const path = process.env.GITHUB_ENV?.trim();
+  if (!path) return;
+  const delimiter = `GHENV_${key}_${randomBytes(8).toString("hex")}`;
+  appendFileSync(path, `${key}<<${delimiter}\n${value}\n${delimiter}\n`);
+}
+
+async function fly(...args: string[]): Promise<{ ok: boolean; detail: string; stdout: string }> {
+  const result = await $`flyctl ${args}`.env({ ...process.env }).nothrow();
+  const stdout = result.stdout.toString();
+  const detail = result.stderr.toString().trim() || stdout.trim();
+  return { ok: result.exitCode === 0, detail, stdout };
+}
+
+async function ensureVaultBootstrapSecrets(dryRun: boolean): Promise<Record<string, string>> {
+  const data = await vaultKvGet();
+  const patch: Record<string, string> = {};
+  const generated: Record<string, string> = {};
+
+  if (!data.PGWEB_AUTH_USER?.trim()) {
+    generated.PGWEB_AUTH_USER = "admin";
+    patch.PGWEB_AUTH_USER = generated.PGWEB_AUTH_USER;
+  }
+  if (!data.PGWEB_AUTH_PASS?.trim()) {
+    generated.PGWEB_AUTH_PASS = randomSecret();
+    patch.PGWEB_AUTH_PASS = generated.PGWEB_AUTH_PASS;
+  }
+  if (!data[FILESTASH_ADMIN_VAULT_KEY]?.trim()) {
+    generated[FILESTASH_ADMIN_VAULT_KEY] = randomSecret();
+    patch[FILESTASH_ADMIN_VAULT_KEY] = generated[FILESTASH_ADMIN_VAULT_KEY];
+  }
+
+  if (Object.keys(patch).length > 0) {
+    if (dryRun) {
+      console.log(`[dry-run] Would patch Vault prd keys: ${Object.keys(patch).join(", ")}`);
+    } else {
+      try {
+        await vaultKvPatch(patch);
+        console.log(`Vault: patched prd keys ${Object.keys(patch).join(", ")}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`Vault patch skipped (${msg}) — will sync generated values to Fly secrets only`);
+      }
+    }
+  } else {
+    console.log("Vault: pgweb auth + filestash admin password already set");
+  }
+
+  const merged = { ...data, ...generated, ...patch };
+
+  if (!merged[VAULT_RUNTIME_TOKEN_KEY]?.trim()) {
+    throw new Error(
+      `Vault prd is missing ${VAULT_RUNTIME_TOKEN_KEY} — containers need a long-lived read token`,
+    );
+  }
+
+  return merged;
+}
+
+async function ensureFlyApp(app: AdminFlyAppSpec, org: string, dryRun: boolean): Promise<void> {
+  const list = await fly("apps", "list", "--json");
+  if (!list.ok) throw new Error(`flyctl apps list failed: ${list.detail}`);
+
+  const apps = JSON.parse(list.stdout) as Array<{ Name?: string; name?: string }>;
+  if (apps.some((entry) => (entry.Name ?? entry.name) === app.flyApp)) {
+    console.log(`  ${app.id}: Fly app ${app.flyApp} exists`);
+    return;
+  }
+
+  if (dryRun) {
+    console.log(`[dry-run] Would create Fly app ${app.flyApp}`);
+    return;
+  }
+
+  const created = await fly("apps", "create", app.flyApp, "--org", org, "--yes");
+  if (!created.ok) throw new Error(`flyctl apps create (${app.flyApp}) failed: ${created.detail}`);
+  console.log(`  ${app.id}: created Fly app ${app.flyApp}`);
+}
+
+async function ensureFlyCert(app: AdminFlyAppSpec, dryRun: boolean): Promise<void> {
+  const list = await fly("certs", "list", "--app", app.flyApp, "--json");
+  if (!list.ok) {
+    if (dryRun) {
+      console.log(`[dry-run] Would add cert ${app.hostname} on ${app.flyApp}`);
+      return;
+    }
+    const added = await fly("certs", "add", app.hostname, "--app", app.flyApp);
+    if (!added.ok) throw new Error(`flyctl certs add (${app.hostname}) failed: ${added.detail}`);
+    console.log(`  ${app.id}: added cert ${app.hostname}`);
+    return;
+  }
+
+  const certs = JSON.parse(list.stdout) as Array<{ Hostname?: string; hostname?: string }>;
+  if (certs.some((cert) => (cert.Hostname ?? cert.hostname) === app.hostname)) {
+    console.log(`  ${app.id}: cert ${app.hostname} exists`);
+    return;
+  }
+
+  if (dryRun) {
+    console.log(`[dry-run] Would add cert ${app.hostname} on ${app.flyApp}`);
+    return;
+  }
+
+  const added = await fly("certs", "add", app.hostname, "--app", app.flyApp);
+  if (!added.ok) throw new Error(`flyctl certs add (${app.hostname}) failed: ${added.detail}`);
+  console.log(`  ${app.id}: added cert ${app.hostname}`);
+}
+
+async function ensureVolume(
+  app: AdminFlyAppSpec,
+  region: string,
+  dryRun: boolean,
+): Promise<void> {
+  if (!app.volume) return;
+
+  const list = await fly("volumes", "list", "--app", app.flyApp, "--json");
+  if (!list.ok) throw new Error(`flyctl volumes list (${app.flyApp}) failed: ${list.detail}`);
+
+  const volumes = JSON.parse(list.stdout) as Array<{ name?: string; Name?: string }>;
+  if (volumes.some((vol) => (vol.name ?? vol.Name) === app.volume!.name)) {
+    console.log(`  ${app.id}: volume ${app.volume.name} exists`);
+    return;
+  }
+
+  if (dryRun) {
+    console.log(
+      `[dry-run] Would create volume ${app.volume.name} (${app.volume.sizeGb}GB, ${region}) on ${app.flyApp}`,
+    );
+    return;
+  }
+
+  const created = await fly(
+    "volumes",
+    "create",
+    app.volume.name,
+    "--size",
+    String(app.volume.sizeGb),
+    "--region",
+    region,
+    "--app",
+    app.flyApp,
+    "--yes",
+  );
+  if (!created.ok) {
+    throw new Error(`flyctl volumes create (${app.volume.name}) failed: ${created.detail}`);
+  }
+  console.log(`  ${app.id}: created volume ${app.volume.name}`);
+}
+
+async function ensureFlyRuntimeSecrets(
+  app: AdminFlyAppSpec,
+  vaultData: Record<string, string>,
+  vaultAddrValue: string,
+  dryRun: boolean,
+): Promise<void> {
+  const pairs: Record<string, string> = {
+    VAULT_ADDR: vaultAddrValue,
+    VAULT_TOKEN: vaultData[VAULT_RUNTIME_TOKEN_KEY]!,
+  };
+
+  if (app.id === "pgweb") {
+    pairs.PGWEB_AUTH_USER = vaultData.PGWEB_AUTH_USER!;
+    pairs.PGWEB_AUTH_PASS = vaultData.PGWEB_AUTH_PASS!;
+  }
+
+  if (app.id === "filestash") {
+    pairs.ADMIN_PASSWORD = vaultData[FILESTASH_ADMIN_VAULT_KEY]!;
+  }
+
+  if (dryRun) {
+    console.log(`[dry-run] Would set Fly secrets on ${app.flyApp}: ${Object.keys(pairs).join(", ")}`);
+    return;
+  }
+
+  const args = [
+    "secrets",
+    "set",
+    ...Object.entries(pairs).map(([key, value]) => `${key}=${value}`),
+    "--app",
+    app.flyApp,
+    "--detach",
+  ];
+  const result = await fly(...args);
+  if (!result.ok) throw new Error(`flyctl secrets set (${app.flyApp}) failed: ${result.detail}`);
+  console.log(`  ${app.id}: synced runtime secrets on ${app.flyApp}`);
+}
+
+async function mintDeployToken(app: AdminFlyAppSpec, dryRun: boolean): Promise<string> {
+  if (dryRun) return "dry-run-deploy-token";
+
+  const result = await fly(
+    "tokens",
+    "create",
+    "deploy",
+    "--app",
+    app.flyApp,
+    "-x",
+    TOKEN_EXPIRY,
+    "-n",
+    `gha-${app.id}`,
+    "-j",
+  );
+  if (!result.ok) {
+    throw new Error(`flyctl tokens create deploy (${app.flyApp}) failed: ${result.detail}`);
+  }
+
+  const body = JSON.parse(result.stdout) as Record<string, unknown>;
+  const token =
+    (typeof body.token === "string" && body.token) ||
+    (typeof body.Token === "string" && body.Token) ||
+    "";
+  if (!token) throw new Error(`flyctl did not return deploy token JSON for ${app.flyApp}`);
+  return token;
+}
+
+async function ensureDeployToken(
+  app: AdminFlyAppSpec,
+  vaultData: Record<string, string>,
+  dryRun: boolean,
+): Promise<string> {
+  let token = vaultData[app.deployTokenVaultKey]?.trim();
+  if (!token) {
+    console.log(`  ${app.id}: minting deploy token...`);
+    token = await mintDeployToken(app, dryRun);
+    if (!dryRun) {
+      try {
+        await vaultKvPatch({ [app.deployTokenVaultKey]: token });
+        console.log(`  ${app.id}: stored ${app.deployTokenVaultKey} in Vault prd`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`  ${app.id}: Vault patch for deploy token skipped (${msg})`);
+      }
+    }
+  } else {
+    console.log(`  ${app.id}: deploy token already in Vault (${app.deployTokenVaultKey})`);
+  }
+  return token;
+}
+
+async function ensureGithubSecret(name: string, value: string, dryRun: boolean): Promise<void> {
+  const repo = infraGithubRepo(loadServicesConfig());
+  if (dryRun) {
+    console.log(`[dry-run] Would set GitHub secret ${name} on ${repo}`);
+    return;
+  }
+
+  const ghToken =
+    process.env.GITHUB_TOKEN_SUPER?.trim() ||
+    process.env.GH_TOKEN?.trim() ||
+    process.env.GITHUB_TOKEN?.trim();
+
+  const gh = await $`gh auth status`
+    .env({ ...process.env, ...(ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {}) })
+    .quiet()
+    .nothrow();
+  if (gh.exitCode !== 0) {
+    console.warn(`  GitHub: skipping secret ${name} sync (gh not authenticated)`);
+    return;
+  }
+
+  try {
+    await $`gh secret set ${name} --repo ${repo} --body ${value}`
+      .env({ ...process.env, ...(ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {}) })
+      .quiet();
+    console.log(`  GitHub: synced secret ${name} on ${repo}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  GitHub: could not set secret ${name} (${msg}) — using GITHUB_ENV for this run`);
+  }
+}
+
+async function ensureDns(
+  apps: readonly AdminFlyAppSpec[],
+  dryRun: boolean,
+): Promise<void> {
+  const creds = cloudflareCredentialsFromEnv();
+  if (!creds) {
+    console.warn("Skipping DNS — CLOUDFLARE_API_TOKEN not set");
+    return;
+  }
+
+  const config = loadServicesConfig();
+  const cf = new CloudflareApi();
+  const zone = await cf.findZoneByName(config.zone);
+  if (!zone) throw new Error(`Cloudflare zone "${config.zone}" not found`);
+
+  const records = await cf.listDnsRecords(zone.id);
+  const proxied = false;
+
+  for (const app of apps) {
+    const content = `${app.flyApp}.fly.dev`;
+    const existing = records.filter((r) => r.name === app.hostname && r.type === "CNAME");
+    const primary = existing[0];
+
+    if (primary?.content === content && primary.proxied === proxied) {
+      console.log(`  ${app.id}: DNS ${app.hostname} OK`);
+      continue;
+    }
+
+    if (dryRun) {
+      console.log(`[dry-run] Would upsert CNAME ${app.hostname} → ${content}`);
+      continue;
+    }
+
+    if (!primary) {
+      await cf.createDnsRecord(zone.id, {
+        name: app.hostname,
+        type: "CNAME",
+        content,
+        proxied,
+        ttl: 1,
+        comment: "managed by infra/scripts/setup-pgweb-filestash.ts",
+      });
+      console.log(`  ${app.id}: created CNAME ${app.hostname} → ${content}`);
+      continue;
+    }
+
+    await cf.updateDnsRecord(zone.id, primary.id, {
+      name: app.hostname,
+      type: "CNAME",
+      content,
+      proxied,
+      ttl: 1,
+      comment: "managed by infra/scripts/setup-pgweb-filestash.ts",
+    });
+    console.log(`  ${app.id}: updated CNAME ${app.hostname} → ${content}`);
+  }
+}
+
+async function setupApp(
+  app: AdminFlyAppSpec,
+  vaultData: Record<string, string>,
+  org: string,
+  region: string,
+  vaultAddrValue: string,
+  dryRun: boolean,
+): Promise<string> {
+  console.log(`\n=== ${app.id} ===`);
+  await ensureFlyApp(app, org, dryRun);
+  await ensureFlyCert(app, dryRun);
+  await ensureVolume(app, region, dryRun);
+  await ensureFlyRuntimeSecrets(app, vaultData, vaultAddrValue, dryRun);
+  return ensureDeployToken(app, vaultData, dryRun);
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  const config = loadServicesConfig();
+  const org = adminFlyOrg(config);
+  const region = adminFlyRegion(config);
+  const vaultAddrValue = adminVaultAddr(config);
+
+  requireFlyApiToken();
+
+  console.log(`Setup pgweb/filestash (${args.dryRun ? "DRY-RUN" : "APPLY"}) apps=${args.apps.map((a) => a.id).join(",")}`);
+
+  const vaultData = await ensureVaultBootstrapSecrets(args.dryRun);
+
+  const deployTokens: Record<string, string> = {};
+  for (const app of args.apps) {
+    deployTokens[app.deployTokenGhSecret] = await setupApp(
+      app,
+      vaultData,
+      org,
+      region,
+      vaultAddrValue,
+      args.dryRun,
+    );
+  }
+
+  for (const [secretName, token] of Object.entries(deployTokens)) {
+    await ensureGithubSecret(secretName, token, args.dryRun);
+    exportGithubEnv(secretName, token);
+  }
+
+  if (!args.skipDns) {
+    console.log("\n=== DNS ===");
+    await ensureDns(args.apps, args.dryRun);
+  }
+
+  console.log("\nSetup complete.");
+}
+
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+});

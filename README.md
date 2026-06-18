@@ -153,18 +153,69 @@ The destroy workflow deletes droplet `origin`, purges `NODE_SSH_*` from Vault, a
 3. Add publish workflow in the project repo (or `bun run rollout-publish`)
 4. Push — CI deploys the new Fly app
 
+## pgweb and Filestash (standalone Fly apps)
+
+Two admin tools live in this repo with their own Dockerfiles and deploy workflow — separate from the GHCR / `services.yaml` pipeline. At container startup each app fetches credentials from Vault via the HTTP API (`curl` + `jq`). Fly only stores bootstrap secrets (`VAULT_ADDR`, `VAULT_TOKEN`; Filestash also gets `ADMIN_PASSWORD`).
+
+| App | Fly app | Domain | Port |
+|-----|---------|--------|------|
+| pgweb | `pgweb-chrisvouga` | `pgweb.chrisvouga.dev` | 8081 |
+| Filestash | `filestash-chrisvouga` | `filestash.chrisvouga.dev` | 8334 |
+
+**Deploy is fully automated** via [`.github/workflows/deploy-pgweb-filestash.yml`](.github/workflows/deploy-pgweb-filestash.yml) on push to `main` (or manual dispatch). Each run:
+
+1. Authenticates to Vault via OIDC (same as deploy-pipeline)
+2. Runs idempotent setup (`bun run setup-pgweb-filestash`) — seeds missing Vault keys, creates Fly apps/certs/volume, syncs runtime secrets, mints deploy tokens, updates GitHub secrets, reconciles Cloudflare DNS
+3. Deploys with `flyctl deploy --remote-only`
+
+### What setup automates
+
+| Step | Behavior |
+|------|----------|
+| Vault `PGWEB_AUTH_USER` / `PGWEB_AUTH_PASS` | Generated and patched to `secret/personal/prd` if missing |
+| Vault `FILESTASH_ADMIN_PASSWORD` | Generated and patched if missing; synced to Fly as `ADMIN_PASSWORD` |
+| Fly apps + TLS certs | Created if missing |
+| Filestash volume `filestash_data` | Created in `iad` if missing |
+| Runtime Fly secrets | `VAULT_ADDR` + long-lived `VAULT_TOKEN` from Vault prd |
+| Deploy tokens | Minted once, stored in Vault (`FLY_API_TOKEN_PGWEB` / `FLY_API_TOKEN_FILESTASH`) and GitHub secrets |
+| DNS | CNAME `*.chrisvouga.dev` → `<app>.fly.dev` via Cloudflare API |
+
+### Prerequisites (org-wide, already required by deploy-pipeline)
+
+- `FLY_TOKEN` in Vault prd (org deploy token)
+- `VAULT_TOKEN` in Vault prd (long-lived read token for runtime containers)
+- Vault OIDC `github-actions` role
+- `CLOUDFLARE_API_TOKEN` for DNS
+
+No manual `flyctl apps create`, cert, volume, or `gh secret set` steps needed after the first workflow run.
+
+### Local commands
+
+```bash
+bun run setup-pgweb-filestash              # idempotent setup (both apps)
+bun run setup-pgweb-filestash --app pgweb  # single app
+bun run deploy-pgweb-filestash --app pgweb # deploy after setup
+```
+
+pgweb pre-seeds **dev** and **prd** Postgres bookmarks from Vault and enables sessions mode. Filestash seeds S3 connections from Vault on every boot and uses `ADMIN_PASSWORD` for the admin console (no manual `/admin` first-boot wizard).
+
 ## Repo layout
 
 ```
 services.yaml          # single source of truth
 fly/<id>/fly.toml      # generated Fly configs
+pgweb/                 # Postgres explorer (standalone deploy)
+filestash/             # S3 file browser (standalone deploy)
 scripts/
   generate-fly.ts      # SSOT → fly.toml
   deploy-fly.ts        # flyctl deploy --image
+  setup-pgweb-filestash.ts
+  deploy-pgweb-filestash.ts
   sync-fly-secrets.ts  # Vault → fly secrets set
   sync-dns.ts          # Cloudflare CNAME → *.fly.dev
 .github/workflows/
   deploy-pipeline.yml
+  deploy-pgweb-filestash.yml
   reusable-publish-image.yml
   destroy-digitalocean.yml   # one-time post-cutover
 ```
