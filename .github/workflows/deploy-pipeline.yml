@@ -2,7 +2,8 @@ name: Deploy Pipeline
 
 # Fly.io stack — fully automated via GitHub Actions.
 #
-#   prepare → dns-sync → make-ghcr-public → fly-deploy (matrix) → health-check-all
+#   prepare → dns-sync | make-ghcr-public | fly-deploy (matrix) | deploy-pgweb | deploy-filestash
+#         → health-check-all
 #
 # Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
 #
@@ -178,6 +179,50 @@ jobs:
       - name: Health-check service
         if: success()
         run: bun run health-check --id "${{ matrix.service_id }}"
+
+  deploy-pgweb:
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.service_id == '')
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
+      - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Idempotent setup (pgweb)
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+        run: bun run setup-pgweb-filestash --app pgweb
+      - name: Deploy pgweb
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+        run: bun run deploy-pgweb-filestash --app pgweb
+
+  deploy-filestash:
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.service_id == '')
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
+      - uses: ./.github/actions/vault-secrets
+        with:
+          vault_addr: ${{ env.VAULT_ADDR }}
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Idempotent setup (filestash)
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+        run: bun run setup-pgweb-filestash --app filestash
+      - name: Deploy filestash
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+        run: bun run deploy-pgweb-filestash --app filestash
 
   health-check-all:
     runs-on: ubuntu-latest

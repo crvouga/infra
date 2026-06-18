@@ -162,7 +162,7 @@ Two admin tools live in this repo with their own Dockerfiles and deploy workflow
 | pgweb | `pgweb-chrisvouga` | `pgweb.chrisvouga.dev` | 8081 |
 | Filestash | `filestash-chrisvouga` | `filestash.chrisvouga.dev` | 8334 |
 
-**Deploy is fully automated** via [`.github/workflows/deploy-pgweb-filestash.yml`](.github/workflows/deploy-pgweb-filestash.yml) on push to `main` (or manual dispatch). Each run:
+**Deploy is fully automated** via [`.github/workflows/deploy-pipeline.yml`](.github/workflows/deploy-pipeline.yml) on push to `main` (or manual dispatch with empty `service_id`). Each run:
 
 1. Authenticates to Vault via OIDC (same as deploy-pipeline)
 2. Runs idempotent setup (`bun run setup-pgweb-filestash`) — seeds missing Vault keys, creates Fly apps/IPs/certs/volume, syncs runtime secrets, reconciles Cloudflare DNS
@@ -216,7 +216,6 @@ scripts/
   sync-dns.ts          # Cloudflare CNAME → *.fly.dev
 .github/workflows/
   deploy-pipeline.yml
-  deploy-pgweb-filestash.yml
   reusable-publish-image.yml
   destroy-digitalocean.yml   # one-time post-cutover
 ```

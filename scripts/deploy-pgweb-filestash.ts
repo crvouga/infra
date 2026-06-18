@@ -6,6 +6,7 @@
  *   bun run deploy-pgweb-filestash --app pgweb
  *   bun run deploy-pgweb-filestash --app filestash
  */
+import { dirname, join } from "node:path";
 import { $ } from "bun";
 import { findAdminFlyApp } from "../lib/admin-fly-apps.js";
 import { requireFlyApiToken } from "../lib/fly-token.js";
@@ -41,9 +42,11 @@ async function main(): Promise<void> {
   }
 
   const token = requireFlyApiToken();
+  const appDir = join(process.cwd(), dirname(app.flyConfig));
 
-  console.log(`Deploying ${app.id} (${app.flyApp})...`);
-  const result = await $`flyctl deploy --config ${app.flyConfig} --remote-only`
+  console.log(`Deploying ${app.id} (${app.flyApp}) from ${appDir}...`);
+  const result = await $`flyctl deploy --config fly.toml --remote-only`
+    .cwd(appDir)
     .env({ ...process.env, FLY_API_TOKEN: token })
     .nothrow();
 
