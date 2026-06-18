@@ -8,6 +8,13 @@ const VAULT_KV_PATH = "secret/data/personal/prd";
 /** KV v2 CLI path (no `/data/` segment). */
 export const VAULT_KV_CLI_PATH = "secret/personal/prd";
 
+export const VAULT_KV_CONFIGS = ["dev", "prd"] as const;
+export type VaultKvConfig = (typeof VAULT_KV_CONFIGS)[number];
+
+export function vaultKvDataPath(config: VaultKvConfig): string {
+  return `secret/data/personal/${config}`;
+}
+
 export function defaultVaultAddr(): string {
   try {
     return vaultAddrFromConfig(loadServicesConfig());
@@ -32,17 +39,37 @@ function vaultToken(): string {
 }
 
 export async function vaultKvGet(token?: string): Promise<Record<string, string>> {
+  return vaultKvGetConfig("prd", token);
+}
+
+export async function vaultKvGetConfig(
+  config: VaultKvConfig,
+  token?: string,
+): Promise<Record<string, string>> {
   const addr = resolveVaultAddr();
   const auth = token ?? vaultToken();
-  const res = await fetch(`${addr}/v1/${VAULT_KV_PATH}`, {
+  const path = vaultKvDataPath(config);
+  const res = await fetch(`${addr}/v1/${path}`, {
     headers: { Authorization: `Bearer ${auth}` },
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Vault GET ${VAULT_KV_PATH} failed (${res.status}): ${text}`);
+    throw new Error(`Vault GET ${path} failed (${res.status}): ${text}`);
   }
   const body = (await res.json()) as { data?: { data?: Record<string, string> } };
   return body.data?.data ?? {};
+}
+
+/** True when the token can read secret/personal/{config} (used by pgweb runtime). */
+export async function vaultKvConfigReadable(
+  config: VaultKvConfig,
+  token: string,
+): Promise<boolean> {
+  const addr = resolveVaultAddr();
+  const res = await fetch(`${addr}/v1/${vaultKvDataPath(config)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.ok;
 }
 
 export async function vaultKvPatch(fields: Record<string, string>): Promise<void> {

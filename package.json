@@ -18,6 +18,7 @@
     "seed-vault-github-secret": "bun run scripts/seed-vault-github-secret.ts",
     "setup-pgweb-filestash": "bun run scripts/setup-pgweb-filestash.ts",
     "deploy-pgweb-filestash": "bun run scripts/deploy-pgweb-filestash.ts",
+    "verify-pgweb-database-access": "bun run scripts/verify-pgweb-database-access.ts",
     "destroy-digitalocean": "bun run scripts/destroy-digitalocean.ts",
     "rollout-publish": "bun run scripts/rollout-publish-workflows.ts",
     "print-platform-env": "bun run scripts/print-platform-env.ts"

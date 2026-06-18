@@ -20,10 +20,17 @@ import {
 import { CloudflareApi, cloudflareCredentialsFromEnv } from "../lib/cloudflare-api.js";
 import { requireFlyApiToken } from "../lib/fly-token.js";
 import { loadServicesConfig } from "../lib/services.js";
-import { vaultKvGet, vaultKvPatch } from "../lib/vault-kv.js";
+import {
+  vaultKvConfigReadable,
+  vaultKvGet,
+  vaultKvGetConfig,
+  vaultKvPatch,
+  type VaultKvConfig,
+} from "../lib/vault-kv.js";
 
 const VAULT_RUNTIME_TOKEN_KEY = "VAULT_TOKEN";
 const FILESTASH_ADMIN_VAULT_KEY = "FILESTASH_ADMIN_PASSWORD";
+const PGWEB_DATABASE_CONFIGS: readonly VaultKvConfig[] = ["dev", "prd"];
 
 type Args = {
   readonly apps: readonly AdminFlyAppSpec[];
@@ -123,6 +130,58 @@ async function ensureVaultBootstrapSecrets(dryRun: boolean): Promise<Record<stri
   }
 
   return merged;
+}
+
+function isPostgresWireUrl(url: string): boolean {
+  return url.startsWith("postgres://") || url.startsWith("postgresql://");
+}
+
+async function ensurePgwebDatabaseAccess(
+  runtimeToken: string,
+  dryRun: boolean,
+): Promise<void> {
+  for (const config of PGWEB_DATABASE_CONFIGS) {
+    if (dryRun) {
+      console.log(`[dry-run] Would verify DATABASE_URL in secret/personal/${config}`);
+      continue;
+    }
+
+    const data = await vaultKvGetConfig(config);
+    const databaseUrl = data.DATABASE_URL?.trim();
+    if (!databaseUrl) {
+      throw new Error(
+        `Vault secret/personal/${config} is missing DATABASE_URL — pgweb bookmarks require dev and prd`,
+      );
+    }
+    if (!isPostgresWireUrl(databaseUrl)) {
+      throw new Error(
+        `Vault secret/personal/${config} DATABASE_URL must be postgres:// or postgresql://`,
+      );
+    }
+    console.log(`  pgweb: DATABASE_URL present in ${config}`);
+  }
+
+  if (dryRun) {
+    console.log("[dry-run] Would verify runtime VAULT_TOKEN reads dev + prd");
+    return;
+  }
+
+  for (const config of PGWEB_DATABASE_CONFIGS) {
+    if (!(await vaultKvConfigReadable(config, runtimeToken))) {
+      throw new Error(
+        `Runtime VAULT_TOKEN cannot read secret/personal/${config}. ` +
+          "Mint a personal-read token: vault/scripts/seed-vault-token.sh",
+      );
+    }
+
+    const data = await vaultKvGetConfig(config, runtimeToken);
+    if (!data.DATABASE_URL?.trim()) {
+      throw new Error(
+        `Runtime VAULT_TOKEN can read secret/personal/${config} but DATABASE_URL is missing`,
+      );
+    }
+    console.log(`  pgweb: runtime token reads ${config} DATABASE_URL`);
+  }
 }
 
 async function ensureFlyApp(app: AdminFlyAppSpec, org: string, dryRun: boolean): Promise<void> {
@@ -340,6 +399,9 @@ async function setupApp(
   dryRun: boolean,
 ): Promise<void> {
   console.log(`\n=== ${app.id} ===`);
+  if (app.id === "pgweb") {
+    await ensurePgwebDatabaseAccess(vaultData[VAULT_RUNTIME_TOKEN_KEY]!, dryRun);
+  }
   await ensureFlyApp(app, org, dryRun);
   await ensureFlyIps(app, dryRun);
   await ensureFlyCert(app, dryRun);

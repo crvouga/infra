@@ -3,7 +3,7 @@ FROM sosedoff/pgweb:latest
 USER root
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends jq \
+  && apt-get install -y --no-install-recommends curl jq \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /pgweb-bookmarks \

@@ -198,6 +198,8 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run setup-pgweb-filestash --app pgweb
+      - name: Verify pgweb database bookmarks (Vault dev + prd)
+        run: bun run verify-pgweb-database-access
       - name: Ensure TLS certificate (pgweb)
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
