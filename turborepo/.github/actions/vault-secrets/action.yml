@@ -1,0 +1,71 @@
+name: Vault secrets (OIDC)
+description: Authenticate to OpenBao via GitHub OIDC and export CI secrets from Vault.
+inputs:
+  vault_config:
+    description: 'Vault config path segment (dev or prd)'
+    required: true
+outputs:
+  vault_available:
+    description: 'true when OIDC auth to Vault succeeded'
+    value: ${{ steps.mark.outputs.vault_available }}
+runs:
+  using: composite
+  steps:
+    - id: vault_core
+      continue-on-error: true
+      uses: hashicorp/vault-action@v4
+      with:
+        url: https://vault.chrisvouga.dev
+        method: jwt
+        path: jwt
+        role: github-actions
+        jwtGithubAudience: https://vault.chrisvouga.dev
+        secrets: |
+          secret/data/personal/${{ inputs.vault_config }} TURBO_TOKEN | TURBO_TOKEN ;
+          secret/data/personal/${{ inputs.vault_config }} TURBO_API | TURBO_API ;
+          secret/data/personal/${{ inputs.vault_config }} TURBO_TEAM | TURBO_TEAM ;
+          secret/data/personal/${{ inputs.vault_config }} TURBO_CACHE | TURBO_CACHE ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_ENDPOINT | B2_S3_ENDPOINT ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_REGION | B2_S3_REGION ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_ACCESS_KEY_ID | B2_S3_ACCESS_KEY_ID ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_SECRET_ACCESS_KEY | B2_S3_SECRET_ACCESS_KEY ;
+          secret/data/personal/${{ inputs.vault_config }} B2_BUCKET | B2_BUCKET ;
+          secret/data/personal/${{ inputs.vault_config }} VAULT_TOKEN | VAULT_TOKEN
+
+    - name: Wait before Vault retry
+      if: steps.vault_core.outcome == 'failure'
+      shell: bash
+      run: sleep 45
+
+    - id: vault_core_retry
+      if: steps.vault_core.outcome == 'failure'
+      continue-on-error: true
+      uses: hashicorp/vault-action@v4
+      with:
+        url: https://vault.chrisvouga.dev
+        method: jwt
+        path: jwt
+        role: github-actions
+        jwtGithubAudience: https://vault.chrisvouga.dev
+        secrets: |
+          secret/data/personal/${{ inputs.vault_config }} TURBO_TOKEN | TURBO_TOKEN ;
+          secret/data/personal/${{ inputs.vault_config }} TURBO_API | TURBO_API ;
+          secret/data/personal/${{ inputs.vault_config }} TURBO_TEAM | TURBO_TEAM ;
+          secret/data/personal/${{ inputs.vault_config }} TURBO_CACHE | TURBO_CACHE ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_ENDPOINT | B2_S3_ENDPOINT ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_REGION | B2_S3_REGION ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_ACCESS_KEY_ID | B2_S3_ACCESS_KEY_ID ;
+          secret/data/personal/${{ inputs.vault_config }} B2_S3_SECRET_ACCESS_KEY | B2_S3_SECRET_ACCESS_KEY ;
+          secret/data/personal/${{ inputs.vault_config }} B2_BUCKET | B2_BUCKET ;
+          secret/data/personal/${{ inputs.vault_config }} VAULT_TOKEN | VAULT_TOKEN
+
+    - name: Require Vault OIDC
+      if: steps.vault_core.outcome == 'failure' && steps.vault_core_retry.outcome != 'success'
+      shell: bash
+      run: |
+        echo "::error::Failed to load secrets from Vault at https://vault.chrisvouga.dev via OIDC"
+        exit 1
+
+    - id: mark
+      shell: bash
+      run: echo "vault_available=true" >> "$GITHUB_OUTPUT"
