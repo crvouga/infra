@@ -154,3 +154,18 @@ vault_cmd() {
     VAULT_TOKEN="${VAULT_TOKEN:-}" \
     "$VAULT_REAL_BIN" "$@"
 }
+
+# zsh interactive shells omit INTERACTIVE_COMMENTS by default, so pasted
+# "cmd --flag  # note" forwards "#" as an argument. Drop from first # token.
+drop_trailing_shell_comment_args() {
+  DROPPED_COMMENT_ARGS=()
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      '#'* )
+        break
+        ;;
+    esac
+    DROPPED_COMMENT_ARGS+=("$arg")
+  done
+}

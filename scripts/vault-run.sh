@@ -32,6 +32,9 @@ if [ "${1:-}" = "--" ]; then
   shift
 fi
 
+drop_trailing_shell_comment_args "$@"
+set -- "${DROPPED_COMMENT_ARGS[@]}"
+
 if [ $# -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   usage
   exit "$([ $# -eq 0 ] && echo 1 || echo 0)"

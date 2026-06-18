@@ -6,25 +6,31 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=../cli/lib/vault-auth.sh
 source "${REPO_ROOT}/cli/lib/vault-auth.sh"
+# shellcheck source=lib/vault-kv.sh
+source "${SCRIPT_DIR}/lib/vault-kv.sh"
 
-MOUNT_PATH="secret"
-PROJECT="personal"
+MOUNT_PATH="${VAULT_KV_DEFAULT_MOUNT}"
+PROJECT="${VAULT_KV_DEFAULT_PROJECT}"
 DRY_RUN=false
 declare -a CONFIGS=("dev" "prd")
 
 SOURCE_KEYS=(
   B2_BUCKET
   B2_S3_ACCESS_KEY_ID
+  B2_S3_ACCESS_KEY_ID
   B2_S3_ENDPOINT
   B2_S3_REGION
+  B2_S3_SECRET_ACCESS_KEY
   B2_S3_SECRET_ACCESS_KEY
 )
 TARGET_KEYS=(
   S3_BUCKET
   S3_ACCESS_KEY_ID
+  S3_ACCESS_KEY
   S3_ENDPOINT
   S3_REGION
   S3_SECRET_ACCESS_KEY
+  S3_SECRET_KEY
 )
 
 TMPFILE=""
@@ -36,14 +42,14 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Copy B2_* secret fields to S3_* names in the same KV path.
+Copy B2_* secret fields to S3_* names in the same KV path (pure aliases).
 
 Mappings:
   B2_BUCKET               -> S3_BUCKET
-  B2_S3_ACCESS_KEY_ID     -> S3_ACCESS_KEY_ID
+  B2_S3_ACCESS_KEY_ID     -> S3_ACCESS_KEY_ID, S3_ACCESS_KEY
   B2_S3_ENDPOINT          -> S3_ENDPOINT
   B2_S3_REGION            -> S3_REGION
-  B2_S3_SECRET_ACCESS_KEY -> S3_SECRET_ACCESS_KEY
+  B2_S3_SECRET_ACCESS_KEY -> S3_SECRET_ACCESS_KEY, S3_SECRET_KEY
 
 Default paths: secret/personal/dev and secret/personal/prd
 
@@ -79,19 +85,6 @@ cleanup() {
   fi
 }
 
-secret_exists() {
-  local path="$1"
-  vault_cmd kv metadata get "$path" >/dev/null 2>&1
-}
-
-read_secret_fields() {
-  local path="$1"
-  local raw
-
-  raw="$(vault_cmd kv get -format=json "$path")"
-  echo "$raw" | jq -c '.data.data // {}'
-}
-
 build_patch_json() {
   local fields="$1"
   local patch='{}'
@@ -112,10 +105,23 @@ build_patch_json() {
 missing_source_keys() {
   local fields="$1"
   local missing=()
-
+  local seen=()
   local i source_key
+
   for i in "${!SOURCE_KEYS[@]}"; do
     source_key="${SOURCE_KEYS[$i]}"
+    local already=false
+    local key
+    for key in "${seen[@]}"; do
+      if [ "$key" = "$source_key" ]; then
+        already=true
+        break
+      fi
+    done
+    if [ "$already" = true ]; then
+      continue
+    fi
+    seen+=("$source_key")
     if ! echo "$fields" | jq -e --arg k "$source_key" 'has($k)' >/dev/null; then
       missing+=("$source_key")
     fi
@@ -129,6 +135,9 @@ missing_source_keys() {
     done
   fi
 }
+
+drop_trailing_shell_comment_args "$@"
+set -- "${DROPPED_COMMENT_ARGS[@]}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -176,20 +185,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-require_cmd jq "Install jq: https://jqlang.github.io/jq/"
-require_cmd curl "Install curl"
-
-if ! export_vault_auth; then
-  echo "" >&2
-  echo "Authenticate with one of:" >&2
-  echo "  vault login -address=\"${VAULT_ADDR}\"" >&2
-  echo "  export VAULT_TOKEN='...'" >&2
-  echo "  ./scripts/init.sh   # then re-run this script" >&2
-  exit 1
-fi
-
-if ! resolve_vault_bin; then
-  echo "ERROR: vault CLI is required (https://openbao.org/docs/install/)" >&2
+if ! assert_vault_ready; then
   exit 1
 fi
 
@@ -197,21 +193,6 @@ trap cleanup EXIT
 
 TMPFILE="$(mktemp)"
 chmod 600 "$TMPFILE"
-
-echo "==> Checking OpenBao health at ${VAULT_ADDR}/v1/sys/health..."
-HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${VAULT_ADDR}/v1/sys/health")"
-if [ "$HTTP_CODE" != "200" ]; then
-  echo "ERROR: Expected HTTP 200 from health check, got ${HTTP_CODE}" >&2
-  echo "OpenBao may be sealed or uninitialized. Unseal before running." >&2
-  exit 1
-fi
-echo "Health check passed (HTTP 200)."
-
-echo "==> Verifying Vault authentication..."
-if ! vault_cmd token lookup >/dev/null 2>&1; then
-  echo "ERROR: VAULT_TOKEN is invalid or expired" >&2
-  exit 1
-fi
 
 if [ "$DRY_RUN" = true ]; then
   echo "==> Dry run mode — no secrets will be written to OpenBao"
@@ -225,7 +206,7 @@ echo ""
 ANY_SUCCESS=false
 
 for config in "${CONFIGS[@]}"; do
-  secret_path="${MOUNT_PATH}/${PROJECT}/${config}"
+  secret_path="$(secret_path_for "$MOUNT_PATH" "$PROJECT" "$config")"
 
   if ! secret_exists "$secret_path"; then
     echo "==> ${PROJECT}/${config}: skipped (no secret at ${secret_path})"
@@ -262,7 +243,7 @@ for config in "${CONFIGS[@]}"; do
     if [ -n "$missing_sources" ]; then
       echo "    missing source: ${missing_sources}"
     fi
-    vault_cmd kv patch "$secret_path" @"$TMPFILE"
+    kv_patch_fields "$secret_path" "$patch_json"
   fi
 
   TOTAL_KEYS_WRITTEN=$((TOTAL_KEYS_WRITTEN + patch_count))
