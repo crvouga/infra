@@ -11,6 +11,7 @@
  */
 import { $ } from "bun";
 import { CloudflareApi, cloudflareCredentialsFromEnv, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
+import { adminFlyAppHostnames } from "../lib/admin-fly-apps.js";
 import {
   allDnsTargets,
   flyAppName,
@@ -218,7 +219,10 @@ async function planActions(
 
   if (args.pruneOrphans) {
     const originHostname = `origin.${config.zone}`;
-    const excludedHostnames = new Set([standaloneVaultHostname(config)]);
+    const excludedHostnames = new Set([
+      standaloneVaultHostname(config),
+      ...adminFlyAppHostnames(config),
+    ]);
     for (const r of records) {
       if (r.name === originHostname && r.type === "A") {
         actions.push({

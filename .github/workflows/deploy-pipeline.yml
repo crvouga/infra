@@ -2,7 +2,8 @@ name: Deploy Pipeline
 
 # Fly.io stack — fully automated via GitHub Actions.
 #
-#   prepare → dns-sync | make-ghcr-public | fly-deploy (matrix) | deploy-pgweb | deploy-filestash
+#   prepare → dns-sync | make-ghcr-public | fly-deploy (matrix)
+#         → deploy-pgweb | deploy-filestash (after dns-sync; TLS + domain verify)
 #         → health-check-all
 #
 # Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
@@ -182,7 +183,7 @@ jobs:
 
   deploy-pgweb:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [prepare, dns-sync]
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.service_id == '')
     steps:
       - uses: actions/checkout@v5
@@ -197,14 +198,33 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run setup-pgweb-filestash --app pgweb
+      - name: Ensure TLS certificate (pgweb)
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          HOSTNAME: pgweb.chrisvouga.dev
+          FLY_APP: crvouga-pgweb
+        run: |
+          set -euo pipefail
+          chmod +x scripts/ensure-fly-cert.sh
+          ./scripts/ensure-fly-cert.sh
       - name: Deploy pgweb
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run deploy-pgweb-filestash --app pgweb
+      - name: Verify custom domain (pgweb)
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          HOSTNAME: pgweb.chrisvouga.dev
+          FLY_APP: crvouga-pgweb
+          ACCEPT_CODES: "401,200"
+        run: |
+          set -euo pipefail
+          chmod +x scripts/verify-admin-domain.sh
+          ./scripts/verify-admin-domain.sh
 
   deploy-filestash:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [prepare, dns-sync]
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.service_id == '')
     steps:
       - uses: actions/checkout@v5
@@ -219,14 +239,34 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run setup-pgweb-filestash --app filestash
+      - name: Ensure TLS certificate (filestash)
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          HOSTNAME: filestash.chrisvouga.dev
+          FLY_APP: crvouga-filestash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/ensure-fly-cert.sh
+          ./scripts/ensure-fly-cert.sh
       - name: Deploy filestash
         env:
           FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run deploy-pgweb-filestash --app filestash
+      - name: Verify custom domain (filestash)
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          HOSTNAME: filestash.chrisvouga.dev
+          FLY_APP: crvouga-filestash
+          ACCEPT_CODES: "200"
+          HEALTH_PATH: /about
+        run: |
+          set -euo pipefail
+          chmod +x scripts/verify-admin-domain.sh
+          ./scripts/verify-admin-domain.sh
 
   health-check-all:
     runs-on: ubuntu-latest
-    needs: [prepare, fly-deploy]
+    needs: [prepare, fly-deploy, deploy-pgweb, deploy-filestash]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

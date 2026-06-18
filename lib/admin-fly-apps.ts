@@ -44,6 +44,13 @@ export function findAdminFlyApp(
   return adminFlyApps(config).find((app) => app.id === id);
 }
 
+/** Hostnames managed by setup-pgweb-filestash — sync-dns must not prune them. */
+export function adminFlyAppHostnames(
+  config: ServicesConfig = loadServicesConfig(),
+): readonly string[] {
+  return adminFlyApps(config).map((app) => app.hostname);
+}
+
 export function adminFlyOrg(config: ServicesConfig = loadServicesConfig()): string {
   return flyOrg(config);
 }
