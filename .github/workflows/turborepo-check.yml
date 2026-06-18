@@ -1,0 +1,76 @@
+# CI checks on turborepo changes. Image publish is in publish-turborepo.yml; deploy is via deploy-pipeline.
+#
+# Secrets: Vault OIDC via .github/actions/turborepo-vault-secrets (not GitHub repo secrets).
+name: Turborepo check
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - turborepo/**
+  pull_request:
+    paths:
+      - turborepo/**
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: turborepo
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: turborepo-check-${{ github.workflow }}-${{ github.head_ref || github.ref || github.run_id }}
+      cancel-in-progress: true
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Import Vault secrets (dev)
+        uses: ./.github/actions/turborepo-vault-secrets
+        with:
+          vault_config: dev
+      - name: Verify Vault secrets (dev)
+        env:
+          CI: true
+          GITHUB_ACTIONS: true
+          VAULT_CONFIG: dev
+          VAULT_PROJECT: personal
+        run: bun run scripts/check-vault-secrets.ts
+      - name: Turbo CI (format, tc, lint, test, build)
+        run: bun run check
+
+  smoke:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: turborepo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Import Vault secrets (prd)
+        uses: ./.github/actions/turborepo-vault-secrets
+        with:
+          vault_config: prd
+      - name: Smoke test remote cache
+        env:
+          CI: true
+          GITHUB_ACTIONS: true
+          VAULT_CONFIG: prd
+          VAULT_PROJECT: personal
+        run: bun run scripts/smoke-test-cache.ts

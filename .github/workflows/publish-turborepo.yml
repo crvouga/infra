@@ -1,0 +1,25 @@
+name: Publish turborepo image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - turborepo/apps/api/**
+      - turborepo/package.json
+      - turborepo/bun.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    uses: ./.github/workflows/reusable-publish-image.yml
+    secrets:
+      DEPLOY_DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+    with:
+      service_id: turborepo
+      dockerfile: turborepo/apps/api/Dockerfile
+      context: turborepo

@@ -4,3 +4,4 @@ env/
 node.env
 .fly-token
 .DS_Store
+turborepo/.cursor/debug-*.log

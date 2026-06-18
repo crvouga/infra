@@ -8,6 +8,7 @@ default_image_tag: latest
 infra_github_repo: crvouga/infra
 skip_rollout_repos:
   - crvouga/portfolio
+  - crvouga/infra
 
 fly:
   org: crvouga
@@ -155,10 +156,10 @@ services:
 
   - id: turborepo
     hostname: turborepo.chrisvouga.dev
-    github_repo: crvouga/turborepo-remote-cache
-    source_code_url: https://github.com/crvouga/turborepo-remote-cache
-    dockerfile: apps/api/Dockerfile
-    build_context: .
+    github_repo: crvouga/infra
+    source_code_url: https://github.com/crvouga/infra/tree/main/turborepo
+    dockerfile: turborepo/apps/api/Dockerfile
+    build_context: turborepo
     port: 8080
     health_check: true
     health_path: /health
