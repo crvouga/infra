@@ -1,4 +1,4 @@
-app = "pgweb-chrisvouga"
+app = "crvouga-pgweb"
 primary_region = "iad"
 
 [build]

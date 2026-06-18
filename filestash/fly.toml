@@ -1,4 +1,4 @@
-app = "filestash-chrisvouga"
+app = "crvouga-filestash"
 primary_region = "iad"
 
 [build]

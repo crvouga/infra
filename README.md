@@ -46,6 +46,8 @@ Project repos ──▶ ghcr.io (public images)
 
 Derived automatically: `image_prefix` (`chrisvouga-dev`), Vault URL (`https://vault.<zone>`).
 
+**Resource naming:** globally unique resources (Fly apps, owned S3 buckets, etc.) use the `crvouga-<id>` prefix — see [AGENTS.md](AGENTS.md).
+
 Inspect derived values:
 
 ```bash
@@ -159,8 +161,8 @@ Two admin tools live in this repo with their own Dockerfiles and deploy workflow
 
 | App | Fly app | Domain | Port |
 |-----|---------|--------|------|
-| pgweb | `pgweb-chrisvouga` | `pgweb.chrisvouga.dev` | 8081 |
-| Filestash | `filestash-chrisvouga` | `filestash.chrisvouga.dev` | 8334 |
+| pgweb | `crvouga-pgweb` | `pgweb.chrisvouga.dev` | 8081 |
+| Filestash | `crvouga-filestash` | `filestash.chrisvouga.dev` | 8334 |
 
 **Deploy is fully automated** via [`.github/workflows/deploy-pipeline.yml`](.github/workflows/deploy-pipeline.yml) on push to `main` (or manual dispatch with empty `service_id`). Each run:
 

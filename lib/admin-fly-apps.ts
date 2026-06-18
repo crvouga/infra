@@ -1,4 +1,11 @@
-import { flyOrg, flyRegion, loadServicesConfig, vaultAddr, type ServicesConfig } from "./services.js";
+import {
+  flyAppName,
+  flyOrg,
+  flyRegion,
+  loadServicesConfig,
+  vaultAddr,
+  type ServicesConfig,
+} from "./services.js";
 
 export type AdminFlyAppSpec = {
   readonly id: "pgweb" | "filestash";
@@ -11,21 +18,18 @@ export type AdminFlyAppSpec = {
   };
 };
 
-const PGWEB_APP = "pgweb-chrisvouga" as const;
-const FILESTASH_APP = "filestash-chrisvouga" as const;
-
 export function adminFlyApps(config: ServicesConfig = loadServicesConfig()): readonly AdminFlyAppSpec[] {
   const zone = config.zone;
   return [
     {
       id: "pgweb",
-      flyApp: PGWEB_APP,
+      flyApp: flyAppName(config, "pgweb"),
       hostname: `pgweb.${zone}`,
       flyConfig: "pgweb/fly.toml",
     },
     {
       id: "filestash",
-      flyApp: FILESTASH_APP,
+      flyApp: flyAppName(config, "filestash"),
       hostname: `filestash.${zone}`,
       flyConfig: "filestash/fly.toml",
       volume: { name: "filestash_data", sizeGb: 1 },
