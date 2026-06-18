@@ -10,7 +10,7 @@ Platform paths, app names, and GHCR prefixes are derived from `services.yaml` â€
 
 **Scale to zero (default):** most services stop when idle and wake on first HTTP request. Run `bun run scale-to-zero` to stop any machines that are still running.
 
-**Always on (`fly.min_machines: 1`):** `vault` only (in the separate `vault` repo).
+**Always on (`fly.min_machines: 1`):** `vault` only (source in [`vault/`](vault/)).
 
 ## Architecture
 
@@ -207,6 +207,8 @@ pgweb pre-seeds **dev** and **prd** Postgres bookmarks from Vault and enables se
 ```
 services.yaml          # single source of truth
 fly/<id>/fly.toml      # generated Fly configs
+vault/                 # OpenBao on Fly (always on; vault-deploy workflow)
+turborepo/             # Turborepo remote cache monorepo (turborepo-check + publish-turborepo)
 pgweb/                 # Postgres explorer (standalone deploy)
 filestash/             # S3 file browser (standalone deploy)
 scripts/
@@ -218,6 +220,9 @@ scripts/
   sync-dns.ts          # Cloudflare CNAME â†’ *.fly.dev
 .github/workflows/
   deploy-pipeline.yml
+  vault-deploy.yml
+  turborepo-check.yml
+  publish-turborepo.yml
   reusable-publish-image.yml
   destroy-digitalocean.yml   # one-time post-cutover
 ```

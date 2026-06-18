@@ -31,12 +31,12 @@ Required keys (manual): `TURBO_TOKEN`, `VAULT_TOKEN`, B2 `B2_*`.
 | `bun run setup`                   | `apps/api/.env` + ensure Vault defaults in dev/prd |
 | `bun run check:vault-secrets`     | Verify dev config (CI gate)                        |
 | `bun run check:vault-secrets:prd` | Verify prd config (deploy gate)                    |
-| `bun run deploy`                  | Points to infra publish-image workflow             |
+| `bun run deploy`                  | Points to infra publish-turborepo workflow           |
 
 ## CI/CD
 
-- **deployment-pipeline.yml** — Vault dev secrets (OIDC) + `bun run check` on every push/PR
-- **publish-image.yml** — build + push GHCR image → dispatch infra deploy on main push
+- **turborepo-check.yml** (infra repo) — Vault dev secrets (OIDC) + `bun run check` on `turborepo/**`
+- **publish-turborepo.yml** (infra repo) — build + push GHCR image → dispatch infra deploy on main push
 
 ## Client usage
 

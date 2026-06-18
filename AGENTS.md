@@ -23,6 +23,20 @@ Public DNS hostnames stay on the zone (`pgweb.chrisvouga.dev`, etc.); only the F
 - Deploy: `bun run deploy-pgweb-filestash --app <pgweb|filestash>` or **Deploy Pipeline** on `main`.
 - App names: `crvouga-pgweb`, `crvouga-filestash` (see naming table above).
 
+## Vault (`vault/`)
+
+- OpenBao on Fly (`crvouga-vault`, `vault.chrisvouga.dev`). Always on.
+- CI: **Vault deploy** workflow (`.github/workflows/vault-deploy.yml`) on `vault/**` changes.
+- GHCR: `ghcr.io/crvouga/chrisvouga-vault`.
+- Local: `cd vault && make gh` for Actions.
+
+## Turborepo remote cache (`turborepo/`)
+
+- Nested Bun monorepo; `cd turborepo && bun install` for local dev.
+- CI: **Turborepo check** on `turborepo/**`; **Publish turborepo image** on API changes.
+- Deploy: publish dispatches infra **Deploy Pipeline** for `crvouga-turborepo`.
+- See [`turborepo/AGENTS.md`](turborepo/AGENTS.md) for secrets and client usage.
+
 ## Hard rules
 
 - Never commit `VAULT_TOKEN`, `FLY_TOKEN`, or deploy tokens.

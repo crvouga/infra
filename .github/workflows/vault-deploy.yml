@@ -1,4 +1,4 @@
-name: Deploy
+name: Vault deploy
 
 # Full pipeline on push to main: migrate -> build -> Fly deploy -> DNS -> TLS -> unseal -> smoke -> health.
 # workflow_dispatch with unseal_only skips migrate/build/deploy; still reconciles DNS/TLS and verifies the domain.
@@ -7,8 +7,8 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "**/*.md"
+    paths:
+      - vault/**
   workflow_dispatch:
     inputs:
       unseal_only:
@@ -17,7 +17,7 @@ on:
         default: false
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: vault-deploy-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -27,6 +27,10 @@ permissions:
 env:
   VAULT_ADDR: https://vault.chrisvouga.dev
   VAULT_HOSTNAME: vault.chrisvouga.dev
+
+defaults:
+  run:
+    working-directory: vault
 
 jobs:
   deploy:
@@ -74,8 +78,8 @@ jobs:
         if: github.event_name == 'push' || inputs.unseal_only != true
         uses: docker/build-push-action@v7.2.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: vault
+          file: vault/Dockerfile
           platforms: linux/amd64
           push: true
           provenance: false

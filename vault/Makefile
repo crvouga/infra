@@ -3,7 +3,7 @@
 	check-database-url clone-prod-db-to-dev
 
 gh:
-	open "https://github.com/crvouga/vault/actions"
+	open "https://github.com/crvouga/infra/actions/workflows/vault-deploy.yml"
 
 sync-dns:
 	chmod +x scripts/sync-dns.sh

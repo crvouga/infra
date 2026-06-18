@@ -1,7 +1,7 @@
-# CI checks on every push/PR. Image publish is in publish-image.yml; deploy is via chrisvouga.dev.
+# CI checks on turborepo changes. Image publish is in publish-turborepo.yml; deploy is via deploy-pipeline.
 #
-# Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
-name: Deployment Pipeline
+# Secrets: Vault OIDC via .github/actions/turborepo-vault-secrets (not GitHub repo secrets).
+name: Turborepo check
 
 permissions:
   contents: read
@@ -10,14 +10,22 @@ permissions:
 on:
   push:
     branches: [main]
+    paths:
+      - turborepo/**
   pull_request:
+    paths:
+      - turborepo/**
   workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: turborepo
 
 jobs:
   check:
     runs-on: ubuntu-latest
     concurrency:
-      group: check-${{ github.workflow }}-${{ github.head_ref || github.ref || github.run_id }}
+      group: turborepo-check-${{ github.workflow }}-${{ github.head_ref || github.ref || github.run_id }}
       cancel-in-progress: true
     timeout-minutes: 20
     steps:
@@ -28,7 +36,7 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Import Vault secrets (dev)
-        uses: ./.github/actions/vault-secrets
+        uses: ./.github/actions/turborepo-vault-secrets
         with:
           vault_config: dev
       - name: Verify Vault secrets (dev)
@@ -45,6 +53,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: turborepo
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -53,7 +64,7 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Import Vault secrets (prd)
-        uses: ./.github/actions/vault-secrets
+        uses: ./.github/actions/turborepo-vault-secrets
         with:
           vault_config: prd
       - name: Smoke test remote cache

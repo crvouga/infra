@@ -1,12 +1,12 @@
-name: Vault secrets (OIDC)
-description: Authenticate to OpenBao via GitHub OIDC and export CI secrets from Vault.
+name: Turborepo Vault secrets (OIDC)
+description: Authenticate to OpenBao via GitHub OIDC and export turborepo CI secrets from Vault.
 inputs:
   vault_config:
-    description: 'Vault config path segment (dev or prd)'
+    description: "Vault config path segment (dev or prd)"
     required: true
 outputs:
   vault_available:
-    description: 'true when OIDC auth to Vault succeeded'
+    description: "true when OIDC auth to Vault succeeded"
     value: ${{ steps.mark.outputs.vault_available }}
 runs:
   using: composite

@@ -1,13 +1,13 @@
-name: Publish image
+name: Publish turborepo image
 
 on:
   push:
     branches:
       - main
     paths:
-      - apps/api/**
-      - package.json
-      - bun.lock
+      - turborepo/apps/api/**
+      - turborepo/package.json
+      - turborepo/bun.lock
   workflow_dispatch:
 
 permissions:
@@ -16,10 +16,10 @@ permissions:
 
 jobs:
   publish:
-    uses: crvouga/chrisvouga.dev/.github/workflows/reusable-publish-image.yml@main
+    uses: ./.github/workflows/reusable-publish-image.yml
     secrets:
       DEPLOY_DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
     with:
       service_id: turborepo
-      dockerfile: apps/api/Dockerfile
-      context: .
+      dockerfile: turborepo/apps/api/Dockerfile
+      context: turborepo
