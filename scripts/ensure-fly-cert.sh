@@ -54,6 +54,11 @@ cert_ready() {
 echo "==> Ensuring Fly TLS certificate for ${HOSTNAME} (${FLY_APP})"
 flyctl certs add "${HOSTNAME}" --app "${FLY_APP}" 2>/dev/null || true
 
+if [ -n "${CLOUDFLARE_API_TOKEN:-${CF_API_TOKEN:-}}" ] && command -v bun >/dev/null 2>&1; then
+  echo "==> Reconciling Cloudflare DNS for ${HOSTNAME}"
+  bun run scripts/reconcile-fly-cert-dns.ts --hostname "${HOSTNAME}" --app "${FLY_APP}" --apply
+fi
+
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
   echo "==> Certificate check ${attempt}/${MAX_ATTEMPTS}"
   ownership_ready || { sleep "$RETRY_DELAY_SEC"; continue; }

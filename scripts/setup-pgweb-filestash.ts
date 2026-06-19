@@ -18,6 +18,7 @@ import {
   type AdminFlyAppSpec,
 } from "../lib/admin-fly-apps.js";
 import { CloudflareApi, cloudflareCredentialsFromEnv } from "../lib/cloudflare-api.js";
+import { reconcileFlyCertDns } from "../lib/fly-cert-dns.js";
 import { requireFlyApiToken } from "../lib/fly-token.js";
 import { loadServicesConfig } from "../lib/services.js";
 import {
@@ -347,46 +348,18 @@ async function ensureDns(
   const zone = await cf.findZoneByName(config.zone);
   if (!zone) throw new Error(`Cloudflare zone "${config.zone}" not found`);
 
-  const records = await cf.listDnsRecords(zone.id);
-  const proxied = false;
+  const managedComment = `managed by infra/scripts/setup-pgweb-filestash.ts (${config.zone})`;
 
   for (const app of apps) {
-    const content = `${app.flyApp}.fly.dev`;
-    const existing = records.filter((r) => r.name === app.hostname && r.type === "CNAME");
-    const primary = existing[0];
-
-    if (primary?.content === content && primary.proxied === proxied) {
-      console.log(`  ${app.id}: DNS ${app.hostname} OK`);
-      continue;
-    }
-
-    if (dryRun) {
-      console.log(`[dry-run] Would upsert CNAME ${app.hostname} → ${content}`);
-      continue;
-    }
-
-    if (!primary) {
-      await cf.createDnsRecord(zone.id, {
-        name: app.hostname,
-        type: "CNAME",
-        content,
-        proxied,
-        ttl: 1,
-        comment: "managed by infra/scripts/setup-pgweb-filestash.ts",
-      });
-      console.log(`  ${app.id}: created CNAME ${app.hostname} → ${content}`);
-      continue;
-    }
-
-    await cf.updateDnsRecord(zone.id, primary.id, {
-      name: app.hostname,
-      type: "CNAME",
-      content,
-      proxied,
-      ttl: 1,
-      comment: "managed by infra/scripts/setup-pgweb-filestash.ts",
+    console.log(`\n  ${app.id}: DNS ${app.hostname}`);
+    await reconcileFlyCertDns({
+      cf,
+      zoneId: zone.id,
+      hostname: app.hostname,
+      flyApp: app.flyApp,
+      dryRun,
+      managedComment,
     });
-    console.log(`  ${app.id}: updated CNAME ${app.hostname} → ${content}`);
   }
 }
 

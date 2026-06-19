@@ -19,6 +19,7 @@
     "setup-pgweb-filestash": "bun run scripts/setup-pgweb-filestash.ts",
     "deploy-pgweb-filestash": "bun run scripts/deploy-pgweb-filestash.ts",
     "verify-pgweb-database-access": "bun run scripts/verify-pgweb-database-access.ts",
+    "reconcile-fly-cert-dns": "bun run scripts/reconcile-fly-cert-dns.ts",
     "destroy-digitalocean": "bun run scripts/destroy-digitalocean.ts",
     "rollout-publish": "bun run scripts/rollout-publish-workflows.ts",
     "print-platform-env": "bun run scripts/print-platform-env.ts"
