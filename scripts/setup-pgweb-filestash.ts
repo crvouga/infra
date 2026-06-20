@@ -31,6 +31,8 @@ import {
 
 const VAULT_RUNTIME_TOKEN_KEY = "VAULT_TOKEN";
 const FILESTASH_ADMIN_VAULT_KEY = "FILESTASH_ADMIN_PASSWORD";
+const FILESTASH_AUTH_USER_KEY = "FILESTASH_AUTH_USER";
+const FILESTASH_AUTH_PASS_KEY = "FILESTASH_AUTH_PASS";
 const PGWEB_DATABASE_CONFIGS: readonly VaultKvConfig[] = ["dev", "prd"];
 
 type Args = {
@@ -105,6 +107,14 @@ async function ensureVaultBootstrapSecrets(dryRun: boolean): Promise<Record<stri
     generated[FILESTASH_ADMIN_VAULT_KEY] = randomSecret();
     patch[FILESTASH_ADMIN_VAULT_KEY] = generated[FILESTASH_ADMIN_VAULT_KEY];
   }
+  if (!data[FILESTASH_AUTH_USER_KEY]?.trim()) {
+    generated[FILESTASH_AUTH_USER_KEY] = "admin";
+    patch[FILESTASH_AUTH_USER_KEY] = generated[FILESTASH_AUTH_USER_KEY];
+  }
+  if (!data[FILESTASH_AUTH_PASS_KEY]?.trim()) {
+    generated[FILESTASH_AUTH_PASS_KEY] = randomSecret();
+    patch[FILESTASH_AUTH_PASS_KEY] = generated[FILESTASH_AUTH_PASS_KEY];
+  }
 
   if (Object.keys(patch).length > 0) {
     if (dryRun) {
@@ -119,7 +129,7 @@ async function ensureVaultBootstrapSecrets(dryRun: boolean): Promise<Record<stri
       }
     }
   } else {
-    console.log("Vault: pgweb auth + filestash admin password already set");
+    console.log("Vault: pgweb auth + filestash admin/login credentials already set");
   }
 
   const merged = { ...data, ...generated, ...patch };
@@ -313,6 +323,8 @@ async function ensureFlyRuntimeSecrets(
 
   if (app.id === "filestash") {
     pairs.ADMIN_PASSWORD = vaultData[FILESTASH_ADMIN_VAULT_KEY]!;
+    pairs.FILESTASH_AUTH_USER = vaultData[FILESTASH_AUTH_USER_KEY]!;
+    pairs.FILESTASH_AUTH_PASS = vaultData[FILESTASH_AUTH_PASS_KEY]!;
   }
 
   if (dryRun) {

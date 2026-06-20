@@ -72,16 +72,96 @@ fetch_s3_connection() {
     }'
 }
 
+ensure_auth_credentials() {
+  if [[ -z "${FILESTASH_AUTH_USER:-}" ]]; then
+    FILESTASH_AUTH_USER="admin"
+  fi
+  if [[ -n "${FILESTASH_AUTH_PASS:-}" ]]; then
+    return 0
+  fi
+  if [[ -n "${ADMIN_PASSWORD:-}" ]]; then
+    FILESTASH_AUTH_PASS="$ADMIN_PASSWORD"
+    return 0
+  fi
+
+  local data
+  data="$(vault_fetch_config prd)"
+  if [[ "$FILESTASH_AUTH_USER" == "admin" ]]; then
+    local vault_user
+    vault_user="$(echo "$data" | jq -r '.FILESTASH_AUTH_USER // empty')"
+    if [[ -n "$vault_user" ]]; then
+      FILESTASH_AUTH_USER="$vault_user"
+    fi
+  fi
+  FILESTASH_AUTH_PASS="$(echo "$data" | jq -r '.FILESTASH_AUTH_PASS // empty')"
+
+  if [[ -z "$FILESTASH_AUTH_PASS" ]]; then
+    echo "FILESTASH_AUTH_PASS (or ADMIN_PASSWORD) is required" >&2
+    exit 1
+  fi
+}
+
 mkdir -p "$CONFIG_DIR"
 
 DEV_CONN="$(fetch_s3_connection "S3 Dev" dev)"
 PRD_CONN="$(fetch_s3_connection "S3 Prod" prd)"
-CONNECTIONS="$(jq -n --argjson dev "$DEV_CONN" --argjson prd "$PRD_CONN" '[ $dev, $prd ]')"
+CONNECTIONS="$(jq -n \
+  --argjson dev "$DEV_CONN" \
+  --argjson prd "$PRD_CONN" \
+  '[{type: $dev.type, label: $dev.label}, {type: $prd.type, label: $prd.label}]')"
+
+ensure_auth_credentials
+HTPASSWD_HASH="$(openssl passwd -6 "$FILESTASH_AUTH_PASS")"
+IDP_PARAMS="$(jq -cn --arg user "$FILESTASH_AUTH_USER" --arg hash "$HTPASSWD_HASH" '{users: ($user + ":" + $hash)}')"
+
+MAPPING_PARAMS="$(jq -cn \
+  --argjson dev "$DEV_CONN" \
+  --argjson prd "$PRD_CONN" \
+  '{
+    ($dev.label): ({
+      type: "s3",
+      access_key_id: $dev.params.access_key_id,
+      secret_access_key: $dev.params.secret_access_key,
+      region: $dev.params.region,
+      endpoint: $dev.params.endpoint,
+      bucket: $dev.params.bucket
+    }),
+    ($prd.label): ({
+      type: "s3",
+      access_key_id: $prd.params.access_key_id,
+      secret_access_key: $prd.params.secret_access_key,
+      region: $prd.params.region,
+      endpoint: $prd.params.endpoint,
+      bucket: $prd.params.bucket
+    })
+  }')"
+
+MIDDLEWARE="$(jq -cn \
+  --arg idp_params "$IDP_PARAMS" \
+  --arg mapping_params "$MAPPING_PARAMS" \
+  '{
+    identity_provider: {
+      type: "htpasswd",
+      params: $idp_params
+    },
+    attribute_mapping: {
+      related_backend: "S3 Dev,S3 Prod",
+      params: $mapping_params
+    }
+  }')"
 
 if [[ -f "$CONFIG_FILE" ]]; then
-  jq --argjson connections "$CONNECTIONS" '.connections = $connections' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
+  jq \
+    --argjson connections "$CONNECTIONS" \
+    --argjson middleware "$MIDDLEWARE" \
+    '.connections = $connections | .middleware = $middleware' \
+    "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
 else
-  jq -n --argjson connections "$CONNECTIONS" '{ connections: $connections }' > "${CONFIG_FILE}.tmp"
+  jq -n \
+    --argjson connections "$CONNECTIONS" \
+    --argjson middleware "$MIDDLEWARE" \
+    '{connections: $connections, middleware: $middleware}' \
+    > "${CONFIG_FILE}.tmp"
 fi
 
 mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
