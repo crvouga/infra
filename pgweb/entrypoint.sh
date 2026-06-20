@@ -29,6 +29,38 @@ vault_get() {
   echo "$val"
 }
 
+# pgweb ships with libpq < 14 (no TLS SNI). Neon routes via SNI or options=endpoint=…
+prepare_neon_database_url() {
+  local uri="$1"
+  local host endpoint_id endpoint_opt
+
+  host="$(printf '%s' "$uri" | sed -nE 's|^[^@]*@([^:/]+).*|\1|p')"
+  case "$host" in
+    *.neon.tech) ;;
+    *) printf '%s' "$uri"; return 0 ;;
+  esac
+
+  case "$uri" in
+    *endpoint%3D* | *endpoint=*) printf '%s' "$uri"; return 0 ;;
+  esac
+
+  endpoint_id="${host%%.*}"
+  endpoint_id="${endpoint_id%-pooler}"
+  endpoint_opt="endpoint%3D${endpoint_id}"
+
+  case "$uri" in
+    *[\?\&]options=*)
+      printf '%s' "$uri" | sed "s/\\(options=[^&]*\\)/\\1%20${endpoint_opt}/"
+      ;;
+    *\?*)
+      printf '%s&options=%s' "$uri" "$endpoint_opt"
+      ;;
+    *)
+      printf '%s?options=%s' "$uri" "$endpoint_opt"
+      ;;
+  esac
+}
+
 write_bookmark() {
   local name="$1" url="$2"
   local escaped="${url//\\/\\\\}"
@@ -48,8 +80,8 @@ fi
 
 export PGWEB_SESSIONS=1
 
-write_bookmark dev "$DEV_DATABASE_URL"
-write_bookmark prd "$PRD_DATABASE_URL"
+write_bookmark dev "$(prepare_neon_database_url "$DEV_DATABASE_URL")"
+write_bookmark prd "$(prepare_neon_database_url "$PRD_DATABASE_URL")"
 
 exec /usr/bin/pgweb \
   --bind=0.0.0.0 \
