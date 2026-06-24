@@ -11,6 +11,7 @@ import { setGhcrPackagePublic } from "../lib/ghcr.js";
 import {
   findService,
   imagePackageName,
+  infraGithubRepo,
   isAlwaysOn,
   loadServicesConfig,
   type ServiceSpec,
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   }
 
   const config = loadServicesConfig();
+  const repoSlug = infraGithubRepo(config);
   const services = servicesToProcess(ids.filter(Boolean));
   console.log(`Make ghcr packages public (${dryRun ? "DRY-RUN" : "APPLY"}) services=${services.length}`);
 
@@ -52,7 +54,7 @@ async function main(): Promise<void> {
 
     let ok = false;
     for (const packageName of names) {
-      if (await setGhcrPackagePublic(config.image_owner, packageName, dryRun)) {
+      if (await setGhcrPackagePublic(config.image_owner, packageName, dryRun, repoSlug)) {
         ok = true;
       }
     }
