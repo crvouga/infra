@@ -39,7 +39,6 @@ import {
   railwayServiceName,
   railwaySleep,
   railwayVolume,
-  railwayHealthcheckPath,
   railwayHealthcheckSetting,
   serviceHealthPath,
   type ServiceSpec,
@@ -105,10 +104,12 @@ function describeService(config: ServicesConfig, service: ServiceSpec): string {
   const image = imageRef(config, service.id);
   const sleep = railwaySleep(service);
   const health = serviceHealthPath(service) ?? "(none)";
-  const railwayHealth = railwayHealthcheckPath(service);
+  const railwayHealth = railwayHealthcheckSetting(service);
   const railwayHealthNote =
-    railwayHealth == null && service.health_check
+    railwayHealth === undefined && service.health_check
       ? " railway-health=(skipped)"
+      : railwayHealth === null
+        ? " railway-health=(disabled)"
       : railwayHealth && railwayHealth !== health
         ? ` railway-health=${railwayHealth}`
         : "";

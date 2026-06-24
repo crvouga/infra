@@ -204,7 +204,7 @@ services:
     health_path: /v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200
     railway:
       sleep: false
-      health_path: /railway-health
+      health_path: /railwayhealth
     env:
       BAO_API_ADDR: "https://vault.chrisvouga.dev"
     secrets:
