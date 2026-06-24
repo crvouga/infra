@@ -31,6 +31,8 @@ export type RailwayServiceConfig = {
   readonly public?: boolean;
   /** Override deploy healthcheck path when `health_path` is not Railway-compatible. */
   readonly health_path?: string;
+  /** When false, disable Railway deploy healthcheck (e.g. OpenBao is sealed until CI unseals). */
+  readonly health_check?: boolean;
   readonly volume?: RailwayVolumeConfig;
 };
 
@@ -134,9 +136,23 @@ export function serviceHealthPath(service: ServiceSpec): string | undefined {
 }
 
 /**
- * Railway `healthcheckPath` rejects hyphens and query strings. Returns undefined to
- * skip Railway's deploy healthcheck (external checks in deploy-railway still use `health_path`).
+ * Railway deploy healthcheck path, or `null` to clear an existing healthcheck.
+ * Returns `undefined` when the path is incompatible and no explicit override exists.
  */
+export function railwayHealthcheckSetting(
+  service: ServiceSpec,
+): string | null | undefined {
+  if (service.railway?.health_check === false) return null;
+
+  if (service.railway?.health_path != null) {
+    const override = service.railway.health_path.trim();
+    return override.length > 0 ? override : null;
+  }
+
+  return railwayHealthcheckPath(service);
+}
+
+/** @deprecated Prefer `railwayHealthcheckSetting` for provision/update. */
 export function railwayHealthcheckPath(service: ServiceSpec): string | undefined {
   if (!service.health_check) return undefined;
 

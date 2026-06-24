@@ -251,14 +251,14 @@ export async function ensureServiceFromImage(input: {
 export async function updateServiceInstance(input: {
   readonly serviceId: string;
   readonly environmentId: string;
-  readonly healthcheckPath?: string;
+  readonly healthcheckPath?: string | null;
   readonly sleepApplication?: boolean;
   readonly region?: string;
   readonly numReplicas?: number;
   readonly registryCredentials?: { readonly username: string; readonly password: string };
 }): Promise<void> {
   const patch: Record<string, unknown> = {};
-  if (input.healthcheckPath != null) patch.healthcheckPath = input.healthcheckPath;
+  if (input.healthcheckPath !== undefined) patch.healthcheckPath = input.healthcheckPath;
   if (input.sleepApplication != null) patch.sleepApplication = input.sleepApplication;
   if (input.region) patch.region = input.region;
   if (input.numReplicas != null) patch.numReplicas = input.numReplicas;

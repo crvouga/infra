@@ -199,10 +199,12 @@ services:
     build_context: vault
     port: 8200
     health_check: true
-    # Query params are for external health checks; Railway uses path-only `/v1/sys/health`.
+    # External checks use sealedcode/uninitcode query params. Railway cannot use those params;
+    # sealed OpenBao returns 503 on /v1/sys/health and would fail deploy — disable Railway HC.
     health_path: /v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200
     railway:
       sleep: false
+      health_check: false
     env:
       BAO_API_ADDR: "https://vault.chrisvouga.dev"
     secrets:

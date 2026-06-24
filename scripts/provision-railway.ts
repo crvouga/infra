@@ -40,6 +40,7 @@ import {
   railwaySleep,
   railwayVolume,
   railwayHealthcheckPath,
+  railwayHealthcheckSetting,
   serviceHealthPath,
   type ServiceSpec,
   type ServicesConfig,
@@ -160,7 +161,7 @@ async function provisionService(
 
   await ensureGhcrPackagePublic(config, service.id);
 
-  const railwayHealthPath = railwayHealthcheckPath(service);
+  const railwayHealthPath = railwayHealthcheckSetting(service);
   await updateServiceInstance({
     serviceId: railwayService.id,
     environmentId,
