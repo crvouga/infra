@@ -77,7 +77,7 @@ async function deployOne(
   const image = imageRef(config, service.id, imageTag);
 
   console.log(`\nDeploy ${service.id} → ${image}`);
-  await syncServiceVariablesToRailway(service, { skipDeploys: true, failOnMissing: true });
+  await syncServiceVariablesToRailway(service, { skipDeploys: false, failOnMissing: true });
 
   const project = await ensureProject(projectName);
   const environment = resolveEnvironment(project, environmentName);

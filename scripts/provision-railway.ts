@@ -151,7 +151,7 @@ async function provisionService(
   });
 
   await syncServiceVariablesToRailway(service, {
-    skipDeploys: true,
+    skipDeploys: false,
     failOnMissing,
     vaultData,
   });

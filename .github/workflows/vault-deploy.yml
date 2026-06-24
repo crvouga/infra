@@ -35,6 +35,13 @@ defaults:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
     steps:
       - uses: actions/checkout@v5
 
@@ -61,8 +68,6 @@ jobs:
 
       - name: Run migrations
         if: github.event_name == 'push' || inputs.unseal_only != true
-        env:
-          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
           chmod +x scripts/migrate.sh
@@ -123,9 +128,6 @@ jobs:
 
       - name: Provision Railway service
         if: github.event_name == 'push' || inputs.unseal_only != true
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           chmod +x scripts/railway-provision.sh
           ./scripts/railway-provision.sh
@@ -133,32 +135,24 @@ jobs:
       - name: Deploy to Railway
         if: github.event_name == 'push' || inputs.unseal_only != true
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           chmod +x scripts/railway-deploy.sh
           ./scripts/railway-deploy.sh
 
       - name: Reconcile DNS
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
           chmod +x scripts/railway-sync-dns.sh
           ./scripts/railway-sync-dns.sh
 
       - name: Verify custom domain (pre-unseal)
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_HEALTHY: "false"
         run: |
           chmod +x scripts/verify-custom-domain.sh
           ./scripts/verify-custom-domain.sh
 
       - name: Unseal OpenBao
-        env:
-          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
           chmod +x scripts/install-vault-cli.sh scripts/repair-openbao-auth-mounts.sh scripts/unseal.sh
@@ -167,8 +161,6 @@ jobs:
           ./scripts/unseal.sh
 
       - name: Smoke test
-        env:
-          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           set -euo pipefail
           export VAULT_TOKEN="$(./scripts/fetch-vault-token.sh)"
@@ -176,7 +168,6 @@ jobs:
 
       - name: Health check custom domain
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_HEALTHY: "true"
         run: ./scripts/verify-custom-domain.sh
 
