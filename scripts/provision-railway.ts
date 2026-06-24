@@ -157,10 +157,6 @@ async function provisionService(
     vaultData,
   });
 
-  await connectServiceImage(railwayService.id, image);
-
-  await ensureGhcrPackagePublic(config, service.id);
-
   const railwayHealthPath = railwayHealthcheckSetting(service);
   await updateServiceInstance({
     serviceId: railwayService.id,
@@ -171,10 +167,14 @@ async function provisionService(
     numReplicas: 1,
   });
 
+  await ensureGhcrPackagePublic(config, service.id);
+
   await ensureRailwayGhcrPullCredentials({
     serviceId: railwayService.id,
     environmentId,
   });
+
+  await connectServiceImage(railwayService.id, image);
 
   const volume = railwayVolume(service);
   if (volume && !args.skipVolumes) {

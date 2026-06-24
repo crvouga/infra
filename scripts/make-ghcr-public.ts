@@ -5,24 +5,46 @@
  *
  * Usage:
  *   bun run scripts/make-ghcr-public.ts
- *   bun run scripts/make-ghcr-public.ts --dry-run
+ *   bun run scripts/make-ghcr-public.ts --id vault --require
  */
 import { setGhcrPackagePublic } from "../lib/ghcr.js";
 import {
+  findService,
   imagePackageName,
   isAlwaysOn,
   loadServicesConfig,
+  type ServiceSpec,
 } from "../lib/services.js";
 
 /** Pre-migration package names still on GHCR. */
 const LEGACY_PACKAGE_NAMES: Readonly<Record<string, readonly string[]>> = {};
 
+function servicesToProcess(ids: readonly string[]): readonly ServiceSpec[] {
+  const config = loadServicesConfig();
+  if (ids.length === 0) return config.services;
+  return ids.map((id) => {
+    const service = findService(config, id);
+    if (!service) {
+      console.error(`No service with id "${id}"`);
+      process.exit(1);
+    }
+    return service;
+  });
+}
+
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
-  const config = loadServicesConfig();
-  console.log(`Make ghcr packages public (${dryRun ? "DRY-RUN" : "APPLY"})`);
+  const requirePublic = process.argv.includes("--require");
+  const ids: string[] = [];
+  for (let i = 0; i < process.argv.length; i++) {
+    if (process.argv[i] === "--id") ids.push(process.argv[++i] ?? "");
+  }
 
-  for (const service of config.services) {
+  const config = loadServicesConfig();
+  const services = servicesToProcess(ids.filter(Boolean));
+  console.log(`Make ghcr packages public (${dryRun ? "DRY-RUN" : "APPLY"}) services=${services.length}`);
+
+  for (const service of services) {
     const names = new Set<string>([
       imagePackageName(config, service.id),
       ...(LEGACY_PACKAGE_NAMES[service.id] ?? []),
@@ -35,10 +57,12 @@ async function main(): Promise<void> {
       }
     }
 
-    if (!ok && isAlwaysOn(service)) {
-      console.warn(
-        `  WARN: always-on service "${service.id}" — no GHCR package visibility updated (publish image or set public manually)`,
-      );
+    if (!ok) {
+      const msg = `${service.id}: no GHCR package visibility updated (needs GH_TOKEN with packages:write)`;
+      if (requirePublic || isAlwaysOn(service)) {
+        throw new Error(msg);
+      }
+      console.warn(`  WARN: ${msg}`);
     }
   }
 }

@@ -14,6 +14,7 @@ import {
   findServiceByName,
   redeployService,
   resolveEnvironment,
+  updateServiceInstance,
   waitForDeployment,
 } from "../lib/railway-api.js";
 import { syncServiceVariablesToRailway } from "../lib/railway-secrets.js";
@@ -25,8 +26,11 @@ import {
   imageRef,
   loadServicesConfig,
   railwayEnvironmentName,
+  railwayHealthcheckSetting,
   railwayProjectName,
+  railwayRegion,
   railwayServiceName,
+  railwaySleep,
   type ServiceSpec,
   type ServicesConfig,
 } from "../lib/services.js";
@@ -86,6 +90,17 @@ async function deployOne(
     throw new Error(
       `Railway service "${serviceName}" not found — run provision-railway --apply first`,
     );
+  }
+
+  const healthcheckPath = railwayHealthcheckSetting(service);
+  if (healthcheckPath !== undefined) {
+    await updateServiceInstance({
+      serviceId: railwayService.id,
+      environmentId: environment.id,
+      healthcheckPath,
+      sleepApplication: railwaySleep(service),
+      region: railwayRegion(config),
+    });
   }
 
   await connectServiceImage(railwayService.id, image);
