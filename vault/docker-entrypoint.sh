@@ -31,4 +31,6 @@ append_search_path() {
 
 export BAO_PG_CONNECTION_URL="$(append_search_path "$DB_CONNECTION_URI")"
 
+health-proxy &
+
 exec bao server -config=/etc/openbao/openbao.hcl
