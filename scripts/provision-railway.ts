@@ -158,14 +158,16 @@ async function provisionService(
   });
 
   const railwayHealthPath = railwayHealthcheckSetting(service);
-  await updateServiceInstance({
-    serviceId: railwayService.id,
-    environmentId,
-    healthcheckPath: railwayHealthPath,
-    sleepApplication: railwaySleep(service),
-    region: railwayRegion(config),
-    numReplicas: 1,
-  });
+  const applyInstanceSettings = async (): Promise<void> => {
+    await updateServiceInstance({
+      serviceId: railwayService.id,
+      environmentId,
+      healthcheckPath: railwayHealthPath,
+      sleepApplication: railwaySleep(service),
+      region: railwayRegion(config),
+      numReplicas: 1,
+    });
+  };
 
   await ensureGhcrPackagePublic(config, service.id);
 
@@ -174,7 +176,9 @@ async function provisionService(
     environmentId,
   });
 
+  await applyInstanceSettings();
   await connectServiceImage(railwayService.id, image);
+  await applyInstanceSettings();
 
   const volume = railwayVolume(service);
   if (volume && !args.skipVolumes) {

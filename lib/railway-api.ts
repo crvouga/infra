@@ -630,11 +630,81 @@ export async function waitForDeployment(
     const status = data.deployment?.status?.toUpperCase() ?? "";
     if (status === "SUCCESS") return;
     if (status === "FAILED" || status === "CRASHED" || status === "REMOVED") {
-      throw new RailwayApiError(`Deployment ${deploymentId} ended with status ${status}`);
+      const details = await deploymentFailureDetails(deploymentId);
+      throw new RailwayApiError(
+        `Deployment ${deploymentId} ended with status ${status}${details ? `\n${details}` : ""}`,
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 5_000));
   }
   throw new RailwayApiError(`Deployment ${deploymentId} did not succeed within ${timeoutMs / 1000}s`);
+}
+
+async function deploymentFailureDetails(deploymentId: string): Promise<string> {
+  try {
+    const data = await railwayRequest<{
+      deployment: {
+        readonly diagnosis?: unknown;
+        readonly meta?: unknown;
+      } | null;
+      deploymentLogs: readonly {
+        readonly timestamp: string;
+        readonly severity?: string | null;
+        readonly message: string;
+      }[];
+      buildLogs: readonly {
+        readonly timestamp: string;
+        readonly severity?: string | null;
+        readonly message: string;
+      }[];
+    }>(
+      `
+      query deploymentFailureDetails($id: String!) {
+        deployment(id: $id) {
+          diagnosis
+          meta
+        }
+        deploymentLogs(deploymentId: $id, limit: 40) {
+          timestamp
+          severity
+          message
+        }
+        buildLogs(deploymentId: $id, limit: 20) {
+          timestamp
+          severity
+          message
+        }
+      }
+    `,
+      { id: deploymentId },
+    );
+
+    const lines: string[] = [];
+    if (data.deployment?.diagnosis) {
+      lines.push(`Diagnosis: ${JSON.stringify(data.deployment.diagnosis)}`);
+    }
+    if (data.deployment?.meta) {
+      lines.push(`Meta: ${JSON.stringify(data.deployment.meta).slice(0, 1_000)}`);
+    }
+    const deploymentLogs = data.deploymentLogs.slice(-20);
+    if (deploymentLogs.length > 0) {
+      lines.push("Deployment logs:");
+      for (const log of deploymentLogs) {
+        lines.push(`  ${log.timestamp} ${log.severity ?? ""} ${log.message}`.trimEnd());
+      }
+    }
+    const buildLogs = data.buildLogs.slice(-10);
+    if (buildLogs.length > 0) {
+      lines.push("Build logs:");
+      for (const log of buildLogs) {
+        lines.push(`  ${log.timestamp} ${log.severity ?? ""} ${log.message}`.trimEnd());
+      }
+    }
+    return lines.join("\n");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Failed to fetch Railway deployment diagnostics: ${msg}`;
+  }
 }
 
 export async function deleteService(serviceId: string): Promise<void> {

@@ -93,7 +93,8 @@ async function deployOne(
   }
 
   const healthcheckPath = railwayHealthcheckSetting(service);
-  if (healthcheckPath !== undefined) {
+  const applyInstanceSettings = async (): Promise<void> => {
+    if (healthcheckPath === undefined) return;
     await updateServiceInstance({
       serviceId: railwayService.id,
       environmentId: environment.id,
@@ -101,9 +102,12 @@ async function deployOne(
       sleepApplication: railwaySleep(service),
       region: railwayRegion(config),
     });
-  }
+  };
 
+  await applyInstanceSettings();
   await connectServiceImage(railwayService.id, image);
+  await applyInstanceSettings();
+
   let deploymentId: string | undefined;
   try {
     deploymentId = await deployService(railwayService.id, environment.id);
