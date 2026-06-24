@@ -24,9 +24,11 @@ import {
 import { ensureRailwayToken } from "../lib/railway-token.js";
 import {
   allDnsTargets,
+  isPublicService,
   loadServicesConfig,
   normalizeDnsHostname,
   railwayEnvironmentName,
+  railwayIsPublic,
   railwayProjectName,
   railwayServiceName,
   standaloneVaultHostname,
@@ -83,11 +85,22 @@ function servicesFromArgs(config: ServicesConfig, args: Args): readonly DnsTarge
   const out: DnsTarget[] = [];
   for (const id of args.ids) {
     const s = all.find((x) => x.id === id);
-    if (!s) {
+    if (s) {
+      out.push(s);
+      continue;
+    }
+
+    const standalone = config.services.find((service) => service.id === id);
+    if (
+      !standalone?.standalone ||
+      !standalone.hostname ||
+      !isPublicService(standalone) ||
+      !railwayIsPublic(standalone)
+    ) {
       console.error(`No public service with id "${id}"`);
       process.exit(1);
     }
-    out.push(s);
+    out.push({ id: standalone.id, hostname: standalone.hostname });
   }
   return out;
 }
