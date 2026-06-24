@@ -3,5 +3,7 @@ env/
 *.env
 node.env
 .fly-token
+.railway-token
+.railway-state.json
 .DS_Store
 turborepo/.cursor/debug-*.log

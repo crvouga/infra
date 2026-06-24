@@ -2,33 +2,52 @@
 
 ## Global resource naming (`crvouga-*`)
 
-Fly.io apps, S3 buckets, and any other **globally unique** platform resource must use the `crvouga-` prefix.
+Railway services, S3 buckets, and any other **globally unique** platform resource must use the `crvouga-` prefix.
 
 | Resource | Pattern | Example |
 | -------- | ------- | ------- |
-| Fly.io app | `crvouga-<id>` | `crvouga-pgweb`, `crvouga-portfolio` |
-| Fly.io default hostname | `crvouga-<id>.fly.dev` | `crvouga-filestash.fly.dev` |
+| Railway service | `crvouga-<id>` | `crvouga-portfolio`, `crvouga-vault` |
+| GHCR image | `chrisvouga-<id>` | `ghcr.io/crvouga/chrisvouga-portfolio` |
 | S3 bucket (when owned by this stack) | `crvouga-<purpose>` or existing shared bucket keys in Vault | — |
 
-Derived from [`services.yaml`](services.yaml) → `fly.app_prefix` (currently `crvouga`) via `flyAppName()` in [`lib/services.ts`](lib/services.ts).
+Derived from [`services.yaml`](services.yaml) → `railway.service_prefix` (currently `crvouga`) via `railwayServiceName()` in [`lib/services.ts`](lib/services.ts).
 
-**Do not** use suffix-style names like `pgweb-chrisvouga` or zone-slug prefixes for Fly apps — they drift from the rest of the fleet and break DNS/setup scripts that expect `crvouga-<id>.fly.dev`.
+Public DNS hostnames stay on the zone (`portfolio.chrisvouga.dev`, etc.); Railway custom domains are provisioned via the GraphQL API and synced to Cloudflare.
 
-Public DNS hostnames stay on the zone (`pgweb.chrisvouga.dev`, etc.); only the Fly app name and `*.fly.dev` target use `crvouga-*`.
+## Standalone vault (`vault/`)
 
-## Admin Fly apps (pgweb, filestash)
+Vault is **`standalone: true`** in [`services.yaml`](services.yaml) — excluded from the fleet **Deploy Pipeline**, fleet DNS sync, and `destroy-fly`. It bootstraps from **GitHub repo secrets** (or exported env), not Vault KV / OIDC.
 
-- Dockerfiles and deploy live under `pgweb/` and `filestash/` (not GHCR).
-- Setup: `bun run setup-pgweb-filestash` — idempotent Fly/Vault/DNS bootstrap.
-- Deploy: `bun run deploy-pgweb-filestash --app <pgweb|filestash>` or **Deploy Pipeline** on `main`.
-- App names: `crvouga-pgweb`, `crvouga-filestash` (see naming table above).
+| Resource | Value |
+| -------- | ----- |
+| Railway service | `crvouga-vault` |
+| Public hostname | `vault.chrisvouga.dev` |
+| GHCR image | `ghcr.io/crvouga/chrisvouga-vault` |
+| CI | **Vault deploy** (`.github/workflows/vault-deploy.yml`) on `vault/**` changes |
 
-## Vault (`vault/`)
+**Bootstrap order (first deploy or rebuild):**
 
-- OpenBao on Fly (`crvouga-vault`, `vault.chrisvouga.dev`). Always on.
-- CI: **Vault deploy** workflow (`.github/workflows/vault-deploy.yml`) on `vault/**` changes.
-- GHCR: `ghcr.io/crvouga/chrisvouga-vault`.
-- Local: `cd vault && make gh` for Actions.
+1. Seed GitHub secrets: `RAILWAY_TOKEN`, `CF_API_TOKEN`, `DB_CONNECTION_URI` — `cd vault && ./scripts/seed-github-secrets.sh`
+2. Deploy vault: push `vault/**` to `main`, or `cd vault && make gh` → run workflow
+3. Init/unseal OpenBao locally (`vault/scripts/init.sh`); store keys in `crvouga.kv`
+4. Seed KV at `secret/data/personal/prd` (Railway token, Cloudflare, per-app keys)
+5. Fleet: `bun run provision-railway --apply` then **Deploy Pipeline**
+
+**Local vault ops (Vault may be down — no `vault run`):**
+
+```bash
+export RAILWAY_TOKEN=... CLOUDFLARE_API_TOKEN=... DB_CONNECTION_URI=...
+cd vault && make deploy    # provision + deploy; make provision | destroy | sync-dns
+```
+
+**Fleet ops (Vault must be up + KV seeded):**
+
+```bash
+vault login                    # admin session
+vault run -- bun run sync-dns --apply
+```
+
+If `vault run` fails with `No value found at secret/personal/prd`, KV is empty — use direct env exports or `vault login` + CLI until prd is re-seeded. For day-to-day local work, `.vault.yaml` may use `config: dev` when prd is empty during a rebuild.
 
 ## Turborepo remote cache (`turborepo/`)
 
@@ -39,6 +58,6 @@ Public DNS hostnames stay on the zone (`pgweb.chrisvouga.dev`, etc.); only the F
 
 ## Hard rules
 
-- Never commit `VAULT_TOKEN`, `FLY_TOKEN`, or deploy tokens.
+- Never commit `VAULT_TOKEN`, `RAILWAY_TOKEN`, or deploy tokens.
 - Vault KV paths for runtime: `secret/data/personal/{dev|prd}`.
-- Generated `fly/<id>/fly.toml` files — do not edit by hand; run `bun run generate-fly`.
+- All Railway provisioning goes through GraphQL scripts (`provision-railway`, `deploy-railway`, `sync-railway-secrets`) — not manual dashboard edits.

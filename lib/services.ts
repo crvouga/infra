@@ -16,17 +16,27 @@ export type AliasSpec = {
   readonly target: string;
 };
 
-export type FlyServiceConfig = {
-  /** Minimum running machines (default 0 — scale to zero). */
-  readonly min_machines?: number;
-  /** Expose HTTP on Fly (default true for public services). */
-  readonly public?: boolean;
+export type RailwayVolumeConfig = {
+  readonly name: string;
+  readonly mount_path: string;
+  readonly size_gb?: number;
 };
 
-export type FlyPlatformConfig = {
-  readonly org: string;
-  readonly app_prefix: string;
+export type RailwayServiceConfig = {
+  /** Enable Railway serverless sleep when idle (default true). */
+  readonly sleep?: boolean;
+  /** Expose HTTP publicly (default true for public services). */
+  readonly public?: boolean;
+  /** Override deploy healthcheck path when `health_path` is not Railway-compatible. */
+  readonly health_path?: string;
+  readonly volume?: RailwayVolumeConfig;
+};
+
+export type RailwayPlatformConfig = {
+  readonly project: string;
+  readonly environment: string;
   readonly region: string;
+  readonly service_prefix?: string;
 };
 
 export type ServiceSpec = {
@@ -35,7 +45,9 @@ export type ServiceSpec = {
   readonly hostname?: string;
   /** No DNS or public URL — queue consumers, etc. */
   readonly internal?: boolean;
-  readonly fly?: FlyServiceConfig;
+  /** Excluded from fleet deploy, DNS sync, and destroy-fly — managed by vault-deploy. */
+  readonly standalone?: boolean;
+  readonly railway?: RailwayServiceConfig;
   readonly github_repo: string;
   readonly source_code_url: string;
   readonly dockerfile: string;
@@ -57,7 +69,7 @@ export type ServicesConfig = {
   readonly infra_github_repo?: string;
   readonly image_prefix?: string;
   readonly skip_rollout_repos?: readonly string[];
-  readonly fly: FlyPlatformConfig;
+  readonly railway: RailwayPlatformConfig;
   readonly aliases?: readonly AliasSpec[];
   readonly services: readonly ServiceSpec[];
 };
@@ -74,40 +86,63 @@ export function vaultAddr(config: ServicesConfig): string {
   return `https://vault.${config.zone}`;
 }
 
-/** Hostname for vault (lives in infra/vault/); infra must not manage or prune its DNS. */
+/** Hostname for vault; infra must not manage or prune its DNS during partial syncs. */
 export function standaloneVaultHostname(config: ServicesConfig): string {
   return `vault.${config.zone}`;
 }
 
-export function flyOrg(config: ServicesConfig): string {
-  const org = config.fly?.org?.trim();
-  if (!org) throw new Error("services.yaml: fly.org is required");
-  return org;
+export function railwayProjectName(config: ServicesConfig): string {
+  const project = config.railway?.project?.trim();
+  if (!project) throw new Error("services.yaml: railway.project is required");
+  return project;
 }
 
-export function flyRegion(config: ServicesConfig): string {
-  return config.fly?.region?.trim() || "iad";
+export function railwayEnvironmentName(config: ServicesConfig): string {
+  return config.railway?.environment?.trim() || "production";
 }
 
-export function flyAppPrefix(config: ServicesConfig): string {
-  return config.fly?.app_prefix?.trim() || "crvouga";
+export function railwayRegion(config: ServicesConfig): string {
+  return config.railway?.region?.trim() || "us-east4";
 }
 
-export function flyAppName(config: ServicesConfig, id: string): string {
-  return `${flyAppPrefix(config)}-${id}`;
+export function railwayServicePrefix(config: ServicesConfig): string {
+  return config.railway?.service_prefix?.trim() || "crvouga";
 }
 
-export function flyAppHostname(config: ServicesConfig, id: string): string {
-  return `${flyAppName(config, id)}.fly.dev`;
+export function railwayServiceName(config: ServicesConfig, id: string): string {
+  return `${railwayServicePrefix(config)}-${id}`;
 }
 
-export function flyMinMachines(service: ServiceSpec): number {
-  return service.fly?.min_machines ?? 0;
+export function railwaySleep(service: ServiceSpec): boolean {
+  return service.railway?.sleep !== false;
 }
 
-export function flyIsPublic(service: ServiceSpec): boolean {
+export function railwayIsPublic(service: ServiceSpec): boolean {
   if (service.internal) return false;
-  return service.fly?.public !== false;
+  return service.railway?.public !== false;
+}
+
+export function railwayVolume(service: ServiceSpec): RailwayVolumeConfig | undefined {
+  return service.railway?.volume;
+}
+
+export function serviceHealthPath(service: ServiceSpec): string | undefined {
+  if (!service.health_check) return undefined;
+  return service.health_path ?? "/";
+}
+
+/**
+ * Railway `healthcheckPath` rejects hyphens and query strings. Returns undefined to
+ * skip Railway's deploy healthcheck (external checks in deploy-railway still use `health_path`).
+ */
+export function railwayHealthcheckPath(service: ServiceSpec): string | undefined {
+  if (!service.health_check) return undefined;
+
+  const raw = service.railway?.health_path ?? service.health_path ?? "/";
+  const pathOnly = raw.split("?")[0]?.trim();
+  if (!pathOnly?.startsWith("/")) return undefined;
+  if (pathOnly.includes("-")) return undefined;
+  return pathOnly || "/";
 }
 
 export function infraGithubRepo(config: ServicesConfig): string {
@@ -128,8 +163,13 @@ export function imageRepo(config: ServicesConfig, id: string): string {
   return `ghcr.io/${config.image_owner}/${imagePackageName(config, id)}`;
 }
 
+export function imageRef(config: ServicesConfig, id: string, tag?: string): string {
+  const resolvedTag = tag?.trim() || config.default_image_tag;
+  return `${imageRepo(config, id)}:${resolvedTag}`;
+}
+
 export function isAlwaysOn(service: ServiceSpec): boolean {
-  return flyMinMachines(service) >= 1;
+  return !railwaySleep(service);
 }
 
 export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
@@ -137,8 +177,8 @@ export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
   if (!raw?.zone?.trim()) {
     throw new Error(`Invalid services config at ${path}: zone is required`);
   }
-  if (!raw?.fly?.org?.trim() || !raw?.fly?.region?.trim()) {
-    throw new Error(`Invalid services config at ${path}: fly.org and fly.region are required`);
+  if (!raw?.railway?.project?.trim() || !raw?.railway?.region?.trim()) {
+    throw new Error(`Invalid services config at ${path}: railway.project and railway.region are required`);
   }
   if (!raw?.services?.length) {
     throw new Error(`Invalid services config at ${path}`);
@@ -154,7 +194,7 @@ export function loadServicesConfig(path = "services.yaml"): ServicesConfig {
       if (service.hostname) {
         throw new Error(`Service "${service.id}" is internal but has hostname`);
       }
-    } else if (flyIsPublic(service)) {
+    } else if (railwayIsPublic(service)) {
       if (!service.hostname) {
         throw new Error(`Service "${service.id}" missing hostname`);
       }
@@ -175,11 +215,12 @@ export function findService(
 
 export type DnsTarget = { readonly id: string; readonly hostname: string };
 
-/** Public hostnames for Cloudflare DNS sync (CNAME → *.fly.dev). */
+/** Public hostnames for Cloudflare DNS sync (fleet only — excludes standalone). */
 export function allDnsTargets(config: ServicesConfig): readonly DnsTarget[] {
   const targets: DnsTarget[] = [];
   for (const service of config.services) {
-    if (!isPublicService(service) || !flyIsPublic(service) || !service.hostname) {
+    if (service.standalone) continue;
+    if (!isPublicService(service) || !railwayIsPublic(service) || !service.hostname) {
       continue;
     }
     targets.push({ id: service.id, hostname: service.hostname });
@@ -189,6 +230,15 @@ export function allDnsTargets(config: ServicesConfig): readonly DnsTarget[] {
 
 export function recordName(hostname: string, zone: string): string {
   return hostname === zone ? "@" : hostname.replace(`.${zone}`, "");
+}
+
+/** Canonical FQDN for comparing Cloudflare record names (relative vs absolute). */
+export function normalizeDnsHostname(name: string, zone: string): string {
+  const trimmed = name.replace(/\.$/, "").trim();
+  if (!trimmed || trimmed === "@") return zone;
+  if (trimmed === zone) return zone;
+  if (trimmed.endsWith(`.${zone}`)) return trimmed;
+  return `${trimmed}.${zone}`;
 }
 
 export function allVaultSecretNames(config: ServicesConfig): readonly string[] {
@@ -217,5 +267,28 @@ export function groupByGithubRepo(
 }
 
 export function deployableServices(config: ServicesConfig): readonly ServiceSpec[] {
-  return config.services;
+  return config.services.filter((service) => !service.standalone);
 }
+
+export function fleetServices(config: ServicesConfig): readonly ServiceSpec[] {
+  return deployableServices(config);
+}
+
+/** @deprecated Use railwayServiceName */
+export const flyAppName = railwayServiceName;
+/** @deprecated Use railwayProjectName */
+export const flyOrg = railwayProjectName;
+/** @deprecated Use railwayRegion */
+export const flyRegion = railwayRegion;
+/** @deprecated Use railwayServicePrefix */
+export const flyAppPrefix = railwayServicePrefix;
+/** @deprecated */
+export function flyAppHostname(config: ServicesConfig, id: string): string {
+  return `${railwayServiceName(config, id)}.up.railway.app`;
+}
+/** @deprecated Use railwaySleep */
+export function flyMinMachines(service: ServiceSpec): number {
+  return railwaySleep(service) ? 0 : 1;
+}
+/** @deprecated Use railwayIsPublic */
+export const flyIsPublic = railwayIsPublic;

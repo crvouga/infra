@@ -1,16 +1,16 @@
-# Infra (Fly.io)
+# Infra (Railway)
 
-Fly.io deployment for all services on the zone defined in [`services.yaml`](services.yaml) (`zone: chrisvouga.dev`).
+Railway deployment for all services on the zone defined in [`services.yaml`](services.yaml) (`zone: chrisvouga.dev`).
 
-Each project repo builds and pushes its own public image to `ghcr.io/<image_owner>/<zone-slug>-<id>` (e.g. `ghcr.io/crvouga/chrisvouga-portfolio`). This repo **only consumes those images** — GitHub Actions syncs DNS/secrets, deploys to Fly, and health-checks.
+Each project repo builds and pushes its own public image to `ghcr.io/<image_owner>/<image_prefix>-<id>` (e.g. `ghcr.io/crvouga/chrisvouga-portfolio`). This repo **only consumes those images** — GitHub Actions provisions Railway services via the GraphQL API, syncs DNS/secrets, deploys, and health-checks.
 
-Cloudflare terminates TLS at the edge (proxied DNS, Full strict). Fly apps run in region `iad`.
+Cloudflare DNS points custom domains at Railway (CNAME + TXT verification). Railway terminates TLS on custom domains; Cloudflare SSL mode is **Full (strict)** with DNS-only records.
 
-Platform paths, app names, and GHCR prefixes are derived from `services.yaml` — not hardcoded in scripts.
+Platform paths, service names, and GHCR prefixes are derived from `services.yaml` — not hardcoded in scripts.
 
-**Scale to zero (default):** most services stop when idle and wake on first HTTP request. Run `bun run scale-to-zero` to stop any machines that are still running.
+**Scale to zero (default):** most services use Railway serverless sleep (`railway.sleep: true`).
 
-**Always on (`fly.min_machines: 1`):** `vault` only (source in [`vault/`](vault/)).
+**Always on:** `vault` only (`railway.sleep: false`). Vault is **standalone** — not deployed by the fleet Deploy Pipeline.
 
 ## Architecture
 
@@ -22,14 +22,14 @@ Project repos ──▶ ghcr.io (public images)
                         │
           ┌─────────────┼─────────────┐
           ▼             ▼             ▼
-       dns-sync    fly-secrets    deploy-fly
+       dns-sync   railway-secrets  deploy-railway
           │             │             │
           └─────────────┼─────────────┘
                         ▼
-              Fly.io (iad) crvouga-*
+         Railway (crvouga-infra / production)
                         │
                         ▼
-                 *.<zone> via Cloudflare CNAME
+              *.<zone> via Cloudflare DNS
 ```
 
 ## Configuration ([`services.yaml`](services.yaml))
@@ -39,14 +39,13 @@ Project repos ──▶ ghcr.io (public images)
 | `zone` | Primary DNS zone (e.g. `chrisvouga.dev`) |
 | `image_owner` | GHCR org/user |
 | `infra_github_repo` | GitHub repo slug for this infra repo |
-| `fly.org` | Fly.io org slug |
-| `fly.app_prefix` | App name prefix (e.g. `crvouga` → `crvouga-vault`) |
-| `fly.region` | Fly region (default `iad`) |
-| `fly.min_machines` | Per service: `0` (scale to zero) or `1` (always on) |
+| `railway.project` | Railway project name (e.g. `crvouga-infra`) |
+| `railway.environment` | Environment name (default `production`) |
+| `railway.region` | Deployment region (default `us-east4`) |
+| `railway.service_prefix` | Service name prefix (`crvouga-{id}`) |
+| `railway.sleep` | Per service: `true` (serverless) or `false` (always on) |
 
-Derived automatically: `image_prefix` (`chrisvouga-dev`), Vault URL (`https://vault.<zone>`).
-
-**Resource naming:** globally unique resources (Fly apps, owned S3 buckets, etc.) use the `crvouga-<id>` prefix — see [AGENTS.md](AGENTS.md).
+Derived automatically: `image_prefix` (`chrisvouga`), Vault URL (`https://vault.<zone>`).
 
 Inspect derived values:
 
@@ -56,66 +55,76 @@ bun run scripts/print-platform-env.ts
 
 ## First deploy
 
-### 1. Create Fly org (first time only)
+Vault must exist before fleet scripts can read secrets from KV. Bootstrap does **not** use `vault run` — GitHub secrets (or exported env) only.
+
+### 1. Deploy vault (standalone)
+
+Seed GitHub secrets from the vault repo:
 
 ```bash
-fly orgs create crvouga   # skip if fly orgs list already shows crvouga
+cd vault
+export CLOUDFLARE_API_TOKEN='...'   # Zone:DNS:Edit for chrisvouga.dev
+./scripts/seed-github-secrets.sh    # CF_API_TOKEN, DB_CONNECTION_URI, RAILWAY_TOKEN
 ```
 
-### 2. Add Vault secrets
+Run **Vault deploy** (push `vault/**` to `main`, or Actions → Vault deploy). The workflow uses `vault/scripts/railway-*.sh` — no Vault OIDC / KV required.
+
+After first deploy: `./scripts/init.sh`, store unseal keys in `crvouga.kv`.
+
+Local alternative (no CI):
+
+```bash
+export RAILWAY_TOKEN=... CLOUDFLARE_API_TOKEN=... DB_CONNECTION_URI=...
+cd vault && make deploy
+```
+
+### 2. Seed Vault KV
 
 In `secret/data/personal/prd` on Vault (`https://vault.<zone>`):
 
 | Key | Purpose |
 |-----|---------|
-| `FLY_TOKEN` | Fly.io deploy token (`fly tokens create deploy`) |
+| `RAILWAY_TOKEN` | Railway account API token |
 | `GITHUB_TOKEN_SUPER` | PAT with `repo` + `admin:org` — triggers workflows, cross-repo dispatch |
 | `CLOUDFLARE_API_TOKEN` | DNS sync |
 | `CLOUDFLARE_ACCOUNT_ID` | DNS sync |
 | Per-app keys | See `secrets:` blocks in `services.yaml` |
 
-### 3. Mint Fly token (no Vault required)
-
-When Vault is down (e.g. post-DO cutover, pre-Fly vault deploy):
+### 3. Provision fleet on Railway
 
 ```bash
-bun run seed-fly-token --mint
+vault run -- bun run provision-railway --apply
+# or: export RAILWAY_TOKEN=... && bun run provision-railway --apply
 ```
 
-Writes `.fly-token` (gitignored). Local scripts (`deploy-fly`, `sync-fly-secrets`) read it automatically.
-
-Push to CI without Vault:
-
-```bash
-gh secret set FLY_TOKEN --repo crvouga/infra --body "$(cat .fly-token)"
-```
-
-After vault is healthy, sync cache → Vault:
-
-```bash
-bun run seed-fly-token --vault
-```
-
-Uses `fly tokens create org` (org-wide). Per-app `fly tokens create deploy` needs `-a <app>`.
+Creates project `crvouga-infra`, fleet services (excludes vault), custom domains, and volumes.
 
 ### 4. Run Deploy Pipeline
 
-Actions → **Deploy Pipeline** → Run workflow (or push to `main`).
+Actions → **Deploy Pipeline** → Run workflow (or push to `main`). Matrix excludes standalone vault.
 
-On first run, `deploy-fly.ts` creates Fly apps, adds certs, and deploys from GHCR.
+### 5. DNS cutover
 
-### 5. Verify
+After validating services on Railway default URLs:
 
 ```bash
-fly apps list
-fly status -a crvouga-vault
+vault run -- bun run sync-dns --apply --wait-for-certs
+bun run health-check --all-public
 ```
 
-Health-check in CI verifies always-on public services (`vault`). Scale-to-zero apps cold-start on first request.
+Fleet DNS sync does not manage `vault.<zone>` — that record is owned by vault-deploy / `cd vault && make sync-dns`.
+
+### 6. Fly teardown (post-cutover)
+
+```bash
+bun run destroy-fly --apply
+```
+
+Remove `FLY_TOKEN` from Vault after Fly apps are destroyed.
 
 ## Per-service deploy
 
-Sibling repos dispatch `deploy-service` with `{ id, image_tag }` after publishing to GHCR. Infra deploys a single Fly app.
+Sibling repos dispatch `deploy-service` with `{ id, image_tag }` after publishing to GHCR. Infra deploys a single Railway service.
 
 Manual single-service deploy:
 
@@ -128,101 +137,34 @@ gh workflow run deploy-pipeline.yml -f service_id=portfolio -f image_tag=abc123
 ```bash
 bun install
 bun run typecheck
-bun run generate-fly          # regenerate fly/*/fly.toml
-bun run generate-fly --check  # CI drift check
+bun run provision-railway --check --fleet-only   # CI drift check (excludes standalone vault)
+bun run provision-railway --apply   # create/update Railway resources
+bun run deploy-railway --id portfolio
+bun run sync-railway-secrets --id portfolio
+bun run sync-dns --apply
 ```
 
-## DNS
+## Parallel validation (pre-cutover)
 
-`sync-dns` creates CNAME records: `hostname` → `crvouga-{id}.fly.dev` (proxied).
-
-SSL mode is set to **Full (strict)** (Fly terminates TLS).
-
-## Cutover from DigitalOcean
-
-After Fly is healthy:
-
-1. Verify vault unseal + spot-check a scale-to-zero app
-2. Run **Destroy DigitalOcean** workflow — type `destroy-origin` to confirm
-3. Follow-up: delete `destroy-digitalocean.yml`, `destroy-digitalocean.ts`, and `DIGITALOCEAN_TOKEN` references
-
-The destroy workflow deletes droplet `origin`, purges `NODE_SSH_*` from Vault, and prunes the legacy `origin.<zone>` A record.
-
-## Adding a new service
-
-1. Add entry to `services.yaml`
-2. `bun run generate-fly`
-3. Add publish workflow in the project repo (or `bun run rollout-publish`)
-4. Push — CI deploys the new Fly app
-
-## pgweb and Filestash (standalone Fly apps)
-
-Two admin tools live in this repo with their own Dockerfiles and deploy workflow — separate from the GHCR / `services.yaml` pipeline. At container startup each app fetches credentials from Vault via the HTTP API (`curl` + `jq`). Fly only stores bootstrap secrets (`VAULT_ADDR`, `VAULT_TOKEN`; Filestash also gets `ADMIN_PASSWORD`).
-
-| App | Fly app | Domain | Port |
-|-----|---------|--------|------|
-| pgweb | `crvouga-pgweb` | `pgweb.chrisvouga.dev` | 8081 |
-| Filestash | `crvouga-filestash` | `filestash.chrisvouga.dev` | 8334 |
-
-**Deploy is fully automated** via [`.github/workflows/deploy-pipeline.yml`](.github/workflows/deploy-pipeline.yml) on push to `main` (or manual dispatch with empty `service_id`). Each run:
-
-1. Authenticates to Vault via OIDC (same as deploy-pipeline)
-2. Runs idempotent setup (`bun run setup-pgweb-filestash`) — seeds missing Vault keys, creates Fly apps/IPs/certs/volume, syncs runtime secrets, reconciles Cloudflare DNS
-3. Deploys with `flyctl deploy --remote-only`
-
-### What setup automates
-
-| Step | Behavior |
-|------|----------|
-| Vault `PGWEB_AUTH_USER` / `PGWEB_AUTH_PASS` | Generated and patched to `secret/personal/prd` if missing |
-| Vault `FILESTASH_ADMIN_PASSWORD` | Generated and patched if missing; synced to Fly as `ADMIN_PASSWORD` |
-| Fly apps + TLS certs + shared IPv4 | Created if missing |
-| Filestash volume `filestash_data` | Created in `iad` if missing |
-| Runtime Fly secrets | `VAULT_ADDR`, `VAULT_TOKEN`, pgweb auth, Filestash `ADMIN_PASSWORD` |
-| DNS | CNAME `*.chrisvouga.dev` → `<app>.fly.dev` via Cloudflare API |
-
-Deploy uses the org-wide `FLY_TOKEN` from Vault (same as deploy-pipeline).
-
-### Prerequisites (org-wide, already required by deploy-pipeline)
-
-- `FLY_TOKEN` in Vault prd (org deploy token)
-- `VAULT_TOKEN` in Vault prd (long-lived read token for runtime containers)
-- Vault OIDC `github-actions` role
-- `CLOUDFLARE_API_TOKEN` for DNS
-
-No manual `flyctl apps create`, cert, volume, or `gh secret set` steps needed after the first workflow run.
-
-### Local commands
-
-```bash
-bun run setup-pgweb-filestash              # idempotent setup (both apps)
-bun run setup-pgweb-filestash --app pgweb  # single app
-bun run deploy-pgweb-filestash --app pgweb # deploy after setup
-```
-
-pgweb pre-seeds **dev** and **prd** Postgres bookmarks from Vault and enables sessions mode. Filestash seeds S3 connections from Vault on every boot and uses `ADMIN_PASSWORD` for the admin console (no manual `/admin` first-boot wizard).
+1. `provision-railway --apply` + `deploy-railway` for all services
+2. Health-check via Railway URLs: `bun run health-check --id todo-app --base-url https://<railway-url>`
+3. When ready: `sync-dns --apply --wait-for-certs` for production hostnames
 
 ## Repo layout
 
 ```
-services.yaml          # single source of truth
-fly/<id>/fly.toml      # generated Fly configs
-vault/                 # OpenBao on Fly (always on; vault-deploy workflow)
-turborepo/             # Turborepo remote cache monorepo (turborepo-check + publish-turborepo)
-pgweb/                 # Postgres explorer (standalone deploy)
-filestash/             # S3 file browser (standalone deploy)
+services.yaml              # single source of truth
+lib/railway-api.ts         # Railway GraphQL client
 scripts/
-  generate-fly.ts      # SSOT → fly.toml
-  deploy-fly.ts        # flyctl deploy --image
-  setup-pgweb-filestash.ts
-  deploy-pgweb-filestash.ts
-  sync-fly-secrets.ts  # Vault → fly secrets set
-  sync-dns.ts          # Cloudflare CNAME → *.fly.dev
+  provision-railway.ts     # project/service/domain/volume provisioning
+  deploy-railway.ts        # deploy GHCR images
+  sync-railway-secrets.ts  # Vault → Railway variables
+  sync-dns.ts              # Cloudflare ← Railway custom domain records
+  destroy-fly.ts           # post-cutover Fly teardown
+  destroy-railway.ts       # remove Railway services by id
+vault/                     # OpenBao (vault-deploy workflow)
+turborepo/                 # Turborepo remote cache
 .github/workflows/
   deploy-pipeline.yml
   vault-deploy.yml
-  turborepo-check.yml
-  publish-turborepo.yml
-  reusable-publish-image.yml
-  destroy-digitalocean.yml   # one-time post-cutover
 ```

@@ -1,32 +1,44 @@
 #!/usr/bin/env bun
 /**
- * Reconcile Cloudflare DNS for Fly.io apps.
+ * Reconcile Cloudflare DNS for Railway custom domains.
  *
- * Per public hostname: A/AAAA → Fly ingress (DNS-only; Fly terminates TLS).
+ * Per public hostname: CNAME + TXT from Railway customDomainCreate status.
  *
  * Usage:
  *   bun run scripts/sync-dns.ts
  *   bun run scripts/sync-dns.ts --apply
  *   bun run scripts/sync-dns.ts --id portfolio --apply
  */
-import { $ } from "bun";
 import { CloudflareApi, cloudflareCredentialsFromEnv, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
-import { adminFlyAppHostnames } from "../lib/admin-fly-apps.js";
+import {
+  ensureCustomDomain,
+  findServiceByName,
+  getCustomDomain,
+  isCustomDomainCertificateReady,
+  listCustomDomains,
+  railwayDnsRecords,
+  resolveEnvironment,
+  resolveProjectContext,
+  type RailwayCustomDomain,
+} from "../lib/railway-api.js";
+import { ensureRailwayToken } from "../lib/railway-token.js";
 import {
   allDnsTargets,
-  flyAppName,
-  flyAppHostname,
   loadServicesConfig,
+  normalizeDnsHostname,
+  railwayEnvironmentName,
+  railwayProjectName,
+  railwayServiceName,
   standaloneVaultHostname,
   type DnsTarget,
   type ServicesConfig,
 } from "../lib/services.js";
-import { requireFlyApiToken } from "../lib/fly-token.js";
 
-type RecordType = "A" | "AAAA" | "CNAME";
+type RecordType = "CNAME" | "TXT";
 
 type DesiredRecord = {
   readonly type: RecordType;
+  readonly name: string;
   readonly content: string;
 };
 
@@ -35,6 +47,7 @@ type Args = {
   readonly apply: boolean;
   readonly proxied: boolean;
   readonly pruneOrphans: boolean;
+  readonly waitForCerts: boolean;
 };
 
 function parseArgs(argv: readonly string[]): Args {
@@ -42,15 +55,18 @@ function parseArgs(argv: readonly string[]): Args {
   let apply = false;
   let proxied = false;
   let pruneOrphans = true;
+  let waitForCerts = false;
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--id") ids.push(argv[++i] ?? "");
     else if (arg === "--apply") apply = true;
     else if (arg === "--dns-only") proxied = false;
     else if (arg === "--no-prune") pruneOrphans = false;
+    else if (arg === "--wait-for-certs") waitForCerts = true;
     else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: bun run scripts/sync-dns.ts [--id <id> ...] [--apply] [--dns-only] [--no-prune]",
+        "Usage: bun run scripts/sync-dns.ts [--id <id> ...] [--apply] [--dns-only] [--no-prune] [--wait-for-certs]",
       );
       process.exit(0);
     } else {
@@ -58,7 +74,7 @@ function parseArgs(argv: readonly string[]): Args {
       process.exit(2);
     }
   }
-  return { ids: ids.filter(Boolean), apply, proxied, pruneOrphans };
+  return { ids: ids.filter(Boolean), apply, proxied, pruneOrphans, waitForCerts };
 }
 
 function servicesFromArgs(config: ServicesConfig, args: Args): readonly DnsTarget[] {
@@ -76,60 +92,53 @@ function servicesFromArgs(config: ServicesConfig, args: Args): readonly DnsTarge
   return out;
 }
 
-function flyCnameTarget(config: ServicesConfig, id: string): string {
-  return flyAppHostname(config, id);
-}
-
-let cachedFlyIngress = new Map<string, { readonly v4?: string; readonly v6?: string }>();
-
-async function flyIngressIps(app: string): Promise<{ readonly v4?: string; readonly v6?: string }> {
-  const cached = cachedFlyIngress.get(app);
-  if (cached) return cached;
-  requireFlyApiToken();
-  const result = await $`flyctl ips list -a ${app} --json`.env({ ...process.env }).quiet().nothrow();
-  if (result.exitCode !== 0) {
-    throw new Error(`flyctl ips list (${app}) failed: ${result.stderr.toString().trim()}`);
-  }
-  const ips = JSON.parse(result.stdout.toString()) as Array<{ Address?: string; Type?: string }>;
-  const v4 = ips.find((ip) => ip.Type === "shared_v4" || ip.Type === "v4")?.Address;
-  const v6 = ips.find((ip) => ip.Type === "v6")?.Address;
-  const resolved = { v4, v6 };
-  cachedFlyIngress.set(app, resolved);
-  return resolved;
-}
-
-async function desiredRecords(
+function toDesiredRecords(
   config: ServicesConfig,
-  id: string,
-  proxied: boolean,
-): Promise<readonly DesiredRecord[]> {
-  if (proxied) {
-    return [{ type: "CNAME", content: flyCnameTarget(config, id) }];
+  domain: RailwayCustomDomain,
+): readonly DesiredRecord[] {
+  return railwayDnsRecords(domain, config.zone).map((record) => ({
+    type: record.recordType,
+    name: record.fqdn,
+    content: record.requiredValue,
+  }));
+}
+
+async function resolveDomainForService(
+  config: ServicesConfig,
+  service: DnsTarget,
+): Promise<RailwayCustomDomain> {
+  const projectName = railwayProjectName(config);
+  const environmentName = railwayEnvironmentName(config);
+  const ctx = await resolveProjectContext(projectName, environmentName);
+  const environment = resolveEnvironment(ctx.project, environmentName);
+  const railwayService = findServiceByName(ctx.project, railwayServiceName(config, service.id));
+  if (!railwayService) {
+    throw new Error(
+      `Railway service "${railwayServiceName(config, service.id)}" not found — run provision-railway --apply`,
+    );
   }
-  const app = flyAppName(config, id);
-  const ips = await flyIngressIps(app);
-  const out: DesiredRecord[] = [];
-  if (ips.v4) out.push({ type: "A", content: ips.v4 });
-  if (ips.v6) out.push({ type: "AAAA", content: ips.v6 });
-  if (out.length === 0) {
-    throw new Error("No Fly ingress IPs found — deploy an app first");
-  }
-  return out;
+
+  const serviceSpec = config.services.find((s) => s.id === service.id);
+  return ensureCustomDomain({
+    projectId: ctx.projectId,
+    environmentId: environment.id,
+    serviceId: railwayService.id,
+    domain: service.hostname,
+    targetPort: serviceSpec?.port,
+  });
 }
 
 type Action =
-  | { readonly kind: "create"; readonly name: string; readonly record: DesiredRecord }
+  | { readonly kind: "create"; readonly record: DesiredRecord }
   | {
       readonly kind: "update";
-      readonly name: string;
       readonly record: DesiredRecord;
       readonly recordId: string;
       readonly reason: string;
     }
   | { readonly kind: "delete"; readonly name: string; readonly recordId: string; readonly reason: string }
-  | { readonly kind: "ok"; readonly name: string };
+  | { readonly kind: "ok"; readonly name: string; readonly type: RecordType };
 
-/** Fly terminates TLS — Cloudflare should use Full (strict). */
 const DESIRED_SSL_MODE = "strict";
 
 async function reconcileSslMode(
@@ -152,77 +161,109 @@ async function reconcileSslMode(
   console.log(`  [done] ${line}`);
 }
 
+function recordKey(record: DesiredRecord, zone: string): string {
+  return `${normalizeDnsHostname(record.name, zone)}|${record.type}`;
+}
+
+function cloudflareRecordKey(record: CloudflareDnsRecord, zone: string): string {
+  return `${normalizeDnsHostname(record.name, zone)}|${record.type.toUpperCase()}`;
+}
+
+function findPrimaryRecord(
+  records: readonly CloudflareDnsRecord[],
+  target: DesiredRecord,
+  zone: string,
+): CloudflareDnsRecord | undefined {
+  const normalized = normalizeDnsHostname(target.name, zone);
+  const targetType = target.type.toUpperCase();
+
+  for (const record of records) {
+    if (
+      normalizeDnsHostname(record.name, zone) === normalized &&
+      record.type.toUpperCase() === targetType
+    ) {
+      return record;
+    }
+  }
+
+  for (const record of records) {
+    if (normalizeDnsHostname(record.name, zone) !== normalized) continue;
+    const type = record.type.toUpperCase();
+    if (type === "CNAME" || type === "A" || type === "AAAA") return record;
+  }
+
+  return undefined;
+}
+
 async function planActions(
   records: readonly CloudflareDnsRecord[],
   config: ServicesConfig,
   services: readonly DnsTarget[],
   args: Args,
 ): Promise<readonly Action[]> {
-  const byName = new Map<string, CloudflareDnsRecord[]>();
+  const zone = config.zone;
+  const byNameType = new Map<string, CloudflareDnsRecord[]>();
   for (const r of records) {
-    const list = byName.get(r.name) ?? [];
+    const key = cloudflareRecordKey(r, zone);
+    const list = byNameType.get(key) ?? [];
     list.push(r);
-    byName.set(r.name, list);
+    byNameType.set(key, list);
   }
 
   const actions: Action[] = [];
-  const desiredNames = new Set<string>();
+  const desiredKeys = new Set<string>();
 
   for (const service of services) {
-    desiredNames.add(service.hostname);
-    const targets = await desiredRecords(config, service.id, args.proxied);
-    const existing = byName.get(service.hostname) ?? [];
-    const managedTypes = new Set(targets.map((t) => t.type));
+    const domain = await resolveDomainForService(config, service);
+    const desired = toDesiredRecords(config, domain);
+    for (const target of desired) {
+      desiredKeys.add(recordKey(target, zone));
+      const key = recordKey(target, zone);
+      const existing = byNameType.get(key) ?? [];
 
-    for (const record of existing) {
-      if (!managedTypes.has(record.type as RecordType)) {
+      for (const extra of existing.slice(1)) {
         actions.push({
           kind: "delete",
-          name: record.name,
-          recordId: record.id,
-          reason: `unmanaged ${record.type} for Fly hostname`,
+          name: extra.name,
+          recordId: extra.id,
+          reason: `duplicate ${target.type}`,
         });
       }
-    }
 
-    for (const target of targets) {
-      const matches = existing.filter((r) => r.type === target.type);
-      if (matches.length === 0) {
-        actions.push({ kind: "create", name: service.hostname, record: target });
+      const primary = existing[0] ?? findPrimaryRecord(records, target, zone);
+      if (!primary) {
+        actions.push({ kind: "create", record: target });
         continue;
       }
 
-      const [primary, ...extra] = matches;
-      for (const e of extra) {
-        actions.push({ kind: "delete", name: e.name, recordId: e.id, reason: `duplicate ${target.type}` });
+      if (primary.type.toUpperCase() !== target.type.toUpperCase()) {
+        actions.push({
+          kind: "delete",
+          name: primary.name,
+          recordId: primary.id,
+          reason: `replace ${primary.type} with ${target.type}`,
+        });
+        actions.push({ kind: "create", record: target });
+        continue;
       }
 
-      if (primary!.content !== target.content || primary!.proxied !== args.proxied) {
+      if (primary.content !== target.content || primary.proxied !== args.proxied) {
         actions.push({
           kind: "update",
-          name: service.hostname,
           record: target,
-          recordId: primary!.id,
+          recordId: primary.id,
           reason: "content/proxied drift",
         });
+      } else {
+        actions.push({ kind: "ok", name: target.name, type: target.type });
       }
-    }
-
-    const allOk = targets.every((target) => {
-      const primary = existing.find((r) => r.type === target.type);
-      return primary?.content === target.content && primary.proxied === args.proxied;
-    });
-    if (allOk && targets.every((t) => existing.some((r) => r.type === t.type))) {
-      actions.push({ kind: "ok", name: service.hostname });
     }
   }
 
   if (args.pruneOrphans) {
     const originHostname = `origin.${config.zone}`;
-    const excludedHostnames = new Set([
-      standaloneVaultHostname(config),
-      ...adminFlyAppHostnames(config),
-    ]);
+    const excludedHostnames = new Set([standaloneVaultHostname(config)]);
+
     for (const r of records) {
       if (r.name === originHostname && r.type === "A") {
         actions.push({
@@ -232,11 +273,15 @@ async function planActions(
           reason: "legacy origin A record (DO droplet)",
         });
       }
-      if (!["CNAME", "A", "AAAA"].includes(r.type)) continue;
-      if (desiredNames.has(r.name)) continue;
-      if (excludedHostnames.has(r.name)) continue;
-      if (!r.name.endsWith(config.zone) && !r.name.includes(`.${config.zone}`)) continue;
-      if (r.type === "CNAME" && !r.content.endsWith(".fly.dev")) continue;
+      if (!["CNAME", "TXT"].includes(r.type)) continue;
+      const key = cloudflareRecordKey(r, zone);
+      if (desiredKeys.has(key)) continue;
+      const normalized = normalizeDnsHostname(r.name, zone);
+      if (excludedHostnames.has(normalized)) continue;
+      if (normalized !== zone && !normalized.endsWith(`.${zone}`)) continue;
+      if (r.type === "CNAME" && !r.content.includes("railway") && !r.content.endsWith(".fly.dev")) {
+        continue;
+      }
       actions.push({
         kind: "delete",
         name: r.name,
@@ -252,13 +297,13 @@ async function planActions(
 function summarise(action: Action): string {
   switch (action.kind) {
     case "create":
-      return `CREATE ${action.name} ${action.record.type} → ${action.record.content}`;
+      return `CREATE ${action.record.name} ${action.record.type} → ${action.record.content}`;
     case "update":
-      return `UPDATE ${action.name} ${action.record.type}: ${action.reason}`;
+      return `UPDATE ${action.record.name} ${action.record.type}: ${action.reason}`;
     case "delete":
       return `DELETE ${action.name} (${action.reason})`;
     case "ok":
-      return `OK     ${action.name}`;
+      return `OK     ${action.name} ${action.type}`;
   }
 }
 
@@ -272,7 +317,7 @@ async function applyAction(
   switch (action.kind) {
     case "create":
       await cf.createDnsRecord(zoneId, {
-        name: action.name,
+        name: action.record.name,
         type: action.record.type,
         content: action.record.content,
         proxied: args.proxied,
@@ -282,7 +327,7 @@ async function applyAction(
       return;
     case "update":
       await cf.updateDnsRecord(zoneId, action.recordId, {
-        name: action.name,
+        name: action.record.name,
         type: action.record.type,
         content: action.record.content,
         proxied: args.proxied,
@@ -298,15 +343,54 @@ async function applyAction(
   }
 }
 
+async function waitForCertificates(
+  config: ServicesConfig,
+  services: readonly DnsTarget[],
+  timeoutMs = 900_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const projectName = railwayProjectName(config);
+  const environmentName = railwayEnvironmentName(config);
+  const ctx = await resolveProjectContext(projectName, environmentName);
+  const environment = resolveEnvironment(ctx.project, environmentName);
+
+  while (Date.now() < deadline) {
+    let pending = 0;
+    for (const service of services) {
+      const railwayService = findServiceByName(ctx.project, railwayServiceName(config, service.id));
+      if (!railwayService) continue;
+      const domains = await listCustomDomains({
+        projectId: ctx.projectId,
+        environmentId: environment.id,
+        serviceId: railwayService.id,
+      });
+      const domain = domains.find((d) => d.domain === service.hostname);
+      if (!domain) continue;
+      const fresh = await getCustomDomain(domain.id, ctx.projectId);
+      const status = fresh.status.certificateStatus?.toUpperCase() ?? "PENDING";
+      if (!isCustomDomainCertificateReady(status)) {
+        pending += 1;
+        console.log(`  ${service.hostname}: certificate ${status}`);
+      }
+    }
+    if (pending === 0) {
+      console.log("  All custom domain certificates issued");
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 15_000));
+  }
+  throw new Error("Timed out waiting for Railway custom domain certificates");
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const cfCreds = cloudflareCredentialsFromEnv();
   if (!cfCreds) {
-    console.warn(
-      "Skipping DNS sync — CLOUDFLARE_API_TOKEN (or CF_API_TOKEN) not set",
-    );
+    console.warn("Skipping DNS sync — CLOUDFLARE_API_TOKEN (or CF_API_TOKEN) not set");
     return;
   }
+
+  await ensureRailwayToken();
   const config = loadServicesConfig();
   const services = servicesFromArgs(config, args);
   const managedComment = `managed by infra/scripts/sync-dns.ts (${config.zone})`;
@@ -318,7 +402,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `Sync DNS (${args.apply ? "APPLY" : "DRY-RUN"}) zone=${config.zone} services=${services.length} proxied=${args.proxied}`,
+    `Sync DNS (${args.apply ? "APPLY" : "DRY-RUN"}) platform=railway zone=${config.zone} services=${services.length} proxied=${args.proxied}`,
   );
 
   const records = await cf.listDnsRecords(zone.id);
@@ -350,6 +434,10 @@ async function main(): Promise<void> {
 
   console.log(`\nSummary: changes=${changes}, errors=${errors}`);
   if (errors > 0) process.exit(1);
+
+  if (args.apply && args.waitForCerts) {
+    await waitForCertificates(config, services);
+  }
 }
 
 main().catch((err) => {

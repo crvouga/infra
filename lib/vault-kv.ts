@@ -42,6 +42,34 @@ export async function vaultKvGet(token?: string): Promise<Record<string, string>
   return vaultKvGetConfig("prd", token);
 }
 
+/** Read secret/personal/prd via VAULT_TOKEN API or active `vault login` session. */
+export async function vaultKvGetPrd(): Promise<Record<string, string>> {
+  if (process.env.VAULT_TOKEN?.trim()) {
+    try {
+      return await vaultKvGetConfig("prd");
+    } catch {
+      // fall through to CLI
+    }
+  }
+  return vaultKvGetCli();
+}
+
+/** Patch secret/personal/prd via VAULT_TOKEN API or active `vault login` session. */
+export async function vaultKvPatchPrd(fields: Record<string, string>): Promise<void> {
+  if (process.env.VAULT_TOKEN?.trim()) {
+    try {
+      await vaultKvPatch(fields);
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("403") && !msg.includes("permission denied")) {
+        throw err;
+      }
+    }
+  }
+  await vaultKvPatchCli(fields);
+}
+
 export async function vaultKvGetConfig(
   config: VaultKvConfig,
   token?: string,
@@ -60,7 +88,7 @@ export async function vaultKvGetConfig(
   return body.data?.data ?? {};
 }
 
-/** True when the token can read secret/personal/{config} (used by pgweb runtime). */
+/** True when the token can read secret/personal/{config}. */
 export async function vaultKvConfigReadable(
   config: VaultKvConfig,
   token: string,

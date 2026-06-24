@@ -1,13 +1,29 @@
 .PHONY: gh sync-dns sync-dev-keys-to-prd seed-vault-token \
 	clone-b2-from-legacy alias-s3-from-b2 check-object-storage \
-	check-database-url clone-prod-db-to-dev
+	check-database-url clone-prod-db-to-dev \
+	provision deploy destroy railway-sync-dns
 
 gh:
 	open "https://github.com/crvouga/infra/actions/workflows/vault-deploy.yml"
 
-sync-dns:
-	chmod +x scripts/sync-dns.sh
-	./scripts/sync-dns.sh
+provision:
+	chmod +x scripts/railway-provision.sh
+	./scripts/railway-provision.sh
+
+deploy:
+	chmod +x scripts/railway-provision.sh scripts/railway-deploy.sh
+	./scripts/railway-provision.sh
+	./scripts/railway-deploy.sh
+
+destroy:
+	chmod +x scripts/railway-destroy.sh
+	./scripts/railway-destroy.sh
+
+sync-dns: railway-sync-dns
+
+railway-sync-dns:
+	chmod +x scripts/railway-sync-dns.sh
+	./scripts/railway-sync-dns.sh
 
 sync-dev-keys-to-prd:
 	./scripts/sync-dev-keys-to-prd.sh

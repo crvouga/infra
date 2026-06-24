@@ -1,9 +1,8 @@
 name: Deploy Pipeline
 
-# Fly.io stack — fully automated via GitHub Actions.
+# Railway stack — fully automated via GitHub Actions.
 #
-#   prepare → dns-sync | make-ghcr-public | fly-deploy (matrix)
-#         → deploy-pgweb | deploy-filestash (after dns-sync; TLS + domain verify)
+#   prepare → dns-sync | make-ghcr-public | railway-deploy (matrix)
 #         → health-check-all
 #
 # Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
@@ -66,7 +65,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun run generate-fly --check
+      - run: bun run provision-railway --check --fleet-only
       - id: resolve
         run: |
           set -euo pipefail
@@ -108,10 +107,9 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
-      - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Reconcile DNS
         env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
           SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
           CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
         run: |
@@ -137,7 +135,7 @@ jobs:
           if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
           bun run sync-aliases "${ARGS[@]}"
 
-  fly-deploy:
+  railway-deploy:
     runs-on: ubuntu-latest
     needs: prepare
     strategy:
@@ -152,28 +150,31 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Sync Fly secrets
+      - name: Ensure Railway service exists
         env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
+        run: bun run provision-railway --id "${{ matrix.service_id }}" --apply
+      - name: Sync Railway secrets
+        env:
+          RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${FLY_TOKEN:-}" ]; then
-            echo "::warning::FLY_TOKEN not set — skipping sync-fly-secrets"
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "::warning::RAILWAY_TOKEN not set — skipping sync-railway-secrets"
             exit 0
           fi
-          bun run sync-fly-secrets --id "${{ matrix.service_id }}"
-      - name: Deploy to Fly
+          bun run sync-railway-secrets --id "${{ matrix.service_id }}"
+      - name: Deploy to Railway
         env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
+          RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
           GH_TOKEN: ${{ env.GITHUB_TOKEN_SUPER || github.token }}
         run: |
           set -euo pipefail
-          if [ -z "${FLY_TOKEN:-}" ]; then
-            echo "ERROR: FLY_TOKEN is required" >&2
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "ERROR: RAILWAY_TOKEN is required" >&2
             exit 1
           fi
-          bun run deploy-fly \
+          bun run deploy-railway \
             --id "${{ matrix.service_id }}" \
             --image-tag "${{ needs.prepare.outputs.image_tag }}"
 
@@ -181,94 +182,9 @@ jobs:
         if: success()
         run: bun run health-check --id "${{ matrix.service_id }}"
 
-  deploy-pgweb:
-    runs-on: ubuntu-latest
-    needs: [prepare, dns-sync]
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.service_id == '')
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
-      - uses: ./.github/actions/vault-secrets
-        with:
-          vault_addr: ${{ env.VAULT_ADDR }}
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Idempotent setup (pgweb)
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-        run: bun run setup-pgweb-filestash --app pgweb
-      - name: Verify pgweb database bookmarks (Vault dev + prd)
-        run: bun run verify-pgweb-database-access
-      - name: Ensure TLS certificate (pgweb)
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-          HOSTNAME: pgweb.chrisvouga.dev
-          FLY_APP: crvouga-pgweb
-        run: |
-          set -euo pipefail
-          chmod +x scripts/ensure-fly-cert.sh
-          ./scripts/ensure-fly-cert.sh
-      - name: Deploy pgweb
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-        run: bun run deploy-pgweb-filestash --app pgweb
-      - name: Verify custom domain (pgweb)
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-          HOSTNAME: pgweb.chrisvouga.dev
-          FLY_APP: crvouga-pgweb
-          ACCEPT_CODES: "401,200"
-        run: |
-          set -euo pipefail
-          chmod +x scripts/verify-admin-domain.sh
-          ./scripts/verify-admin-domain.sh
-
-  deploy-filestash:
-    runs-on: ubuntu-latest
-    needs: [prepare, dns-sync]
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.service_id == '')
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
-      - uses: ./.github/actions/vault-secrets
-        with:
-          vault_addr: ${{ env.VAULT_ADDR }}
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Idempotent setup (filestash)
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-        run: bun run setup-pgweb-filestash --app filestash
-      - name: Ensure TLS certificate (filestash)
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-          HOSTNAME: filestash.chrisvouga.dev
-          FLY_APP: crvouga-filestash
-        run: |
-          set -euo pipefail
-          chmod +x scripts/ensure-fly-cert.sh
-          ./scripts/ensure-fly-cert.sh
-      - name: Deploy filestash
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-        run: bun run deploy-pgweb-filestash --app filestash
-      - name: Verify custom domain (filestash)
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
-          HOSTNAME: filestash.chrisvouga.dev
-          FLY_APP: crvouga-filestash
-          ACCEPT_CODES: "200"
-          HEALTH_PATH: /about
-        run: |
-          set -euo pipefail
-          chmod +x scripts/verify-admin-domain.sh
-          ./scripts/verify-admin-domain.sh
-
   health-check-all:
     runs-on: ubuntu-latest
-    needs: [prepare, fly-deploy, deploy-pgweb, deploy-filestash]
+    needs: [prepare, railway-deploy]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -277,8 +193,5 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
-      - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Health-check all public services
-        env:
-          FLY_API_TOKEN: ${{ env.FLY_TOKEN }}
         run: bun run health-check --all-public

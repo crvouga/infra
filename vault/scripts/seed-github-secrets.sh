@@ -33,9 +33,9 @@ Cloudflare requires a dashboard API token (Wrangler OAuth does not work):
 
 Optional overrides (env vars, ${ENV_FILE}, or ${ENV_SECRETS_FILE}):
   NEON_PROJECT_ID, CF_API_TOKEN, CLOUDFLARE_API_TOKEN,
-  DB_CONNECTION_URI, VAULT_TOKEN
+  DB_CONNECTION_URI, RAILWAY_TOKEN, VAULT_TOKEN
 
-Required GitHub secrets: CF_API_TOKEN, DB_CONNECTION_URI
+Required GitHub secrets: CF_API_TOKEN, DB_CONNECTION_URI, RAILWAY_TOKEN
 Optional GitHub secret:  VAULT_TOKEN (from init-output.json after init.sh)
 EOF
 }
@@ -216,6 +216,25 @@ fetch_vault_token() {
   fi
 }
 
+fetch_railway_token() {
+  if [ -n "${RAILWAY_TOKEN:-}" ]; then
+    record_source "RAILWAY_TOKEN (environment override)"
+    return 0
+  fi
+
+  local infra_railway_token="${REPO_ROOT}/../.railway-token"
+  if [ -f "$infra_railway_token" ]; then
+    echo "==> Fetching RAILWAY_TOKEN from ${infra_railway_token}"
+    RAILWAY_TOKEN="$(tr -d '[:space:]' < "$infra_railway_token")"
+    record_source "RAILWAY_TOKEN (../.railway-token)"
+    return 0
+  fi
+
+  echo "ERROR: RAILWAY_TOKEN is required." >&2
+  echo "       export RAILWAY_TOKEN=... or write token to infra/.railway-token" >&2
+  exit 1
+}
+
 assert_non_empty() {
   local name="$1"
   local value="$2"
@@ -262,17 +281,20 @@ echo ""
 fetch_cf_api_token
 verify_cf_api_token
 fetch_db_connection_uri
+fetch_railway_token
 fetch_vault_token
 
 assert_non_empty CF_API_TOKEN "$CF_API_TOKEN"
 assert_non_empty DB_CONNECTION_URI "$DB_CONNECTION_URI"
+assert_non_empty RAILWAY_TOKEN "$RAILWAY_TOKEN"
 
 echo ""
 echo "==> Setting GitHub Actions secrets..."
 gh secret set CF_API_TOKEN --body "$CF_API_TOKEN" --repo "$GITHUB_REPO"
 gh secret set DB_CONNECTION_URI --body "$DB_CONNECTION_URI" --repo "$GITHUB_REPO"
+gh secret set RAILWAY_TOKEN --body "$RAILWAY_TOKEN" --repo "$GITHUB_REPO"
 
-GITHUB_SET=(CF_API_TOKEN DB_CONNECTION_URI)
+GITHUB_SET=(CF_API_TOKEN DB_CONNECTION_URI RAILWAY_TOKEN)
 
 if [ -n "${VAULT_TOKEN:-}" ]; then
   gh secret set VAULT_TOKEN --body "$VAULT_TOKEN" --repo "$GITHUB_REPO"

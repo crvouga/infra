@@ -7,12 +7,13 @@
  *   eval "$(bun run scripts/print-platform-env.ts --format shell)"
  */
 import {
-  flyAppPrefix,
-  flyOrg,
-  flyRegion,
   imagePrefix,
   infraGithubRepo,
   loadServicesConfig,
+  railwayEnvironmentName,
+  railwayProjectName,
+  railwayRegion,
+  railwayServicePrefix,
   vaultAddr,
   zoneSlug,
 } from "../lib/services.js";
@@ -41,10 +42,11 @@ function main(): void {
     VAULT_ADDR: vaultAddr(config),
     IMAGE_PREFIX: imagePrefix(config),
     INFRA_GITHUB_REPO: infraGithubRepo(config),
-    FLY_ORG: flyOrg(config),
-    FLY_REGION: flyRegion(config),
-    FLY_APP_PREFIX: flyAppPrefix(config),
-    STACK_DESCRIPTION: `${config.zone} Fly.io stack`,
+    RAILWAY_PROJECT: railwayProjectName(config),
+    RAILWAY_ENVIRONMENT: railwayEnvironmentName(config),
+    RAILWAY_REGION: railwayRegion(config),
+    RAILWAY_SERVICE_PREFIX: railwayServicePrefix(config),
+    STACK_DESCRIPTION: `${config.zone} Railway stack`,
   };
 
   if (format === "github") {

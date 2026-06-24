@@ -1,23 +1,26 @@
 # Secret Store (OpenBao)
 
-Production-ready [OpenBao](https://openbao.org/) deployment on Fly.io — Neon Postgres storage, Cloudflare DNS, and a single GitHub Actions deploy pipeline.
+Production-ready [OpenBao](https://openbao.org/) deployment on Railway — Neon Postgres storage, Cloudflare DNS, and a standalone GitHub Actions deploy pipeline (not part of the infra fleet Deploy Pipeline).
 
 **URL:** https://vault.chrisvouga.dev
+
+Vault deploy bootstraps from **GitHub repo secrets** (`RAILWAY_TOKEN`, `CF_API_TOKEN`, `DB_CONNECTION_URI`) — it does not use Vault KV or the fleet `vault-secrets` OIDC action. After Vault is up and KV is seeded, fleet scripts use `vault run` as usual.
 
 ## Architecture
 
 ```
-vault repo (push to main)
-  └── deploy.yml
+infra repo (vault/** push or vault-deploy workflow)
+  └── vault-deploy.yml
         ├── migrate Neon Postgres (secret_store schema)
         ├── build + push ghcr.io/crvouga/chrisvouga-vault
-        ├── Fly deploy (crvouga-vault)
-        ├── reconcile DNS (vault.chrisvouga.dev)
+        ├── vault/scripts/railway-provision.sh + railway-deploy.sh
+        ├── vault/scripts/railway-sync-dns.sh (vault.chrisvouga.dev)
         └── unseal + smoke-test from crvouga.kv
 
-OpenBao (Fly) ──storage──► Neon Postgres (secret_store schema)
-Cloudflare DNS ──► vault.chrisvouga.dev ──► Fly TLS
+OpenBao (Railway) ──storage──► Neon Postgres (secret_store schema)
+Cloudflare DNS ──► vault.chrisvouga.dev ──► Railway TLS
 crvouga.kv ──unseal keys + root_token──► CI unseal + smoke-test
+GitHub secrets ──bootstrap──► Railway / Cloudflare (no KV required)
 ```
 
 ## Database schema
@@ -62,6 +65,7 @@ chmod +x scripts/seed-github-secrets.sh
 |--------|----------|--------|
 | `CF_API_TOKEN` | Yes | `CLOUDFLARE_API_TOKEN` — dashboard API token |
 | `DB_CONNECTION_URI` | Yes | `neon connection-string` |
+| `RAILWAY_TOKEN` | Yes | Railway account API token — [railway.app/account/tokens](https://railway.app/account/tokens) |
 | `VAULT_TOKEN` | Optional | `init-output.json` — CI reads `root_token` from `crvouga.kv` instead |
 
 Flags:
@@ -70,13 +74,28 @@ Flags:
 
 Optional overrides via [`.env`](.env) or [`.env.secrets`](.env.secrets.example). Set `NEON_PROJECT_ID` if you have multiple Neon projects.
 
-Runtime secrets (`DB_CONNECTION_URI`) are synced to Fly via the deploy workflow.
+Runtime secrets (`DB_CONNECTION_URI`) are synced to Railway via the deploy workflow.
 
 ### 2. Deploy via GitHub Actions
 
-Push to `main` on this repo (or run **Deploy** manually). The workflow migrates the DB, builds the image, deploys to Fly, reconciles DNS, unseals OpenBao, and runs smoke tests.
+Push `vault/**` on the infra repo (or run **Vault deploy** manually). The workflow migrates the DB, builds the image, runs `vault/scripts/railway-*.sh` (GitHub secrets only — no Vault KV), reconciles DNS, unseals OpenBao, and runs smoke tests.
 
 Every container restart leaves OpenBao **sealed**; CI unseals automatically on each deploy.
+
+### Local Railway ops (no `vault run`)
+
+When Vault is down, sealed, or KV at `secret/personal/prd` is empty:
+
+```bash
+export RAILWAY_TOKEN=... CLOUDFLARE_API_TOKEN=... DB_CONNECTION_URI=...
+cd vault
+make provision    # provision-railway --id vault
+make deploy       # provision + sync secrets + deploy + DNS
+make sync-dns     # Cloudflare record for vault.chrisvouga.dev only
+make destroy      # destroy-railway --id vault
+```
+
+Scripts live under [`scripts/railway-*.sh`](scripts/) and call infra root `provision-railway`, `deploy-railway`, etc. `RAILWAY_TOKEN` may also be read from repo-root `.railway-token`.
 
 ### 3. Initialize OpenBao (one-time, local)
 
@@ -122,7 +141,7 @@ The **Deploy** workflow runs migrations on every push to `main` (before build/de
 After a restart or redeploy, OpenBao starts **sealed**. CI auto-unseals on every deploy from `crvouga.kv`. To re-unseal without redeploying:
 
 ```bash
-gh workflow run deploy.yml -f unseal_only=true
+gh workflow run vault-deploy.yml -f unseal_only=true
 ```
 
 To unseal manually from the CLI:
@@ -230,32 +249,33 @@ Returns HTTP 200 even when sealed or uninitialized, so the process stays healthy
 
 ```
 vault/
-├── .github/workflows/
-│   └── deploy.yml                 # migrate → build → Fly deploy → DNS → unseal → smoke
-├── cli/                           # Global vault wrapper (vault run / vault setup)
+├── Makefile                       # make deploy | provision | destroy | sync-dns
 ├── config/openbao.hcl             # OpenBao server config
 ├── migrations/                    # SQL migrations (secret_store schema)
 ├── scripts/
+│   ├── railway-provision.sh       # Bootstrap: provision-railway --id vault
+│   ├── railway-deploy.sh          # sync-railway-secrets + deploy-railway
+│   ├── railway-destroy.sh         # destroy-railway --id vault
+│   ├── railway-sync-dns.sh       # vault.chrisvouga.dev DNS only
+│   ├── lib/railway-bootstrap.sh   # RAILWAY_TOKEN / CF token (no vault run)
 │   ├── init.sh                    # First-time initialization
 │   ├── migrate.sh                 # Apply database migrations
 │   ├── unseal.sh                  # Auto-unseal from crvouga.kv (CI)
 │   ├── seed-github-secrets.sh     # Auto-fetch + seed GitHub secrets
 │   ├── smoke-test.sh              # End-to-end verification
-│   ├── lib/vault-kv.sh            # Shared KV read/write helpers
-│   ├── create-s3-secrets-from-b2.sh
-│   ├── clone-b2-bucket-from-legacy.sh
-│   ├── check-object-storage-creds.sh
-│   ├── check-database-url-health.sh
-│   └── clone-prod-database-to-dev.sh
+│   └── ...
 ├── docker-entrypoint.sh
 └── Dockerfile
 ```
+
+CI workflow: infra repo `.github/workflows/vault-deploy.yml` (not a nested `vault/.github/workflows/deploy.yml`).
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| Smoke test returns 503 | OpenBao is sealed — run manual unseal or `gh workflow run deploy.yml -f unseal_only=true` |
-| DNS not resolving | Run `make sync-dns` (needs `CF_API_TOKEN`) or re-run **Deploy** workflow; flush local cache: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder` |
+| Smoke test returns 503 | OpenBao is sealed — run manual unseal or `gh workflow run vault-deploy.yml -f unseal_only=true` |
+| DNS not resolving | `cd vault && make sync-dns` (needs `CF_API_TOKEN`) or re-run **Vault deploy**; flush local cache: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder` |
+| `vault run` / sync-dns fails with missing prd KV | Bootstrap vault with env exports + `make deploy`; re-seed `secret/personal/prd` after init |
 | DB connection errors | Verify `DB_CONNECTION_URI` in Vault / infra env sync |
 | Migration job fails | Check `DB_CONNECTION_URI` GitHub secret; ensure Neon allows GitHub Actions IPs |

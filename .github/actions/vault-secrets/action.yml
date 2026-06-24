@@ -23,7 +23,7 @@ runs:
           secret/data/personal/prd TWILIO_ACCOUNT_SID | TWILIO_ACCOUNT_SID ;
           secret/data/personal/prd TWILIO_AUTH_TOKEN | TWILIO_AUTH_TOKEN ;
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
-          secret/data/personal/prd FLY_TOKEN | FLY_TOKEN ;
+          secret/data/personal/prd RAILWAY_TOKEN | RAILWAY_TOKEN ;
           secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER ;
           secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN ;
           secret/data/personal/prd DATABASE_URL | DATABASE_URL ;
@@ -55,7 +55,7 @@ runs:
           secret/data/personal/prd TWILIO_ACCOUNT_SID | TWILIO_ACCOUNT_SID ;
           secret/data/personal/prd TWILIO_AUTH_TOKEN | TWILIO_AUTH_TOKEN ;
           secret/data/personal/prd TWILIO_SERVICE_SID | TWILIO_SERVICE_SID ;
-          secret/data/personal/prd FLY_TOKEN | FLY_TOKEN ;
+          secret/data/personal/prd RAILWAY_TOKEN | RAILWAY_TOKEN ;
           secret/data/personal/prd GITHUB_TOKEN_SUPER | GITHUB_TOKEN_SUPER ;
           secret/data/personal/prd VAULT_TOKEN | VAULT_TOKEN ;
           secret/data/personal/prd DATABASE_URL | DATABASE_URL ;

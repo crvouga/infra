@@ -1,7 +1,7 @@
 name: Vault deploy
 
-# Full pipeline on push to main: migrate -> build -> Fly deploy -> DNS -> TLS -> unseal -> smoke -> health.
-# workflow_dispatch with unseal_only skips migrate/build/deploy; still reconciles DNS/TLS and verifies the domain.
+# Full pipeline on push to main: migrate -> build -> Railway deploy -> DNS -> unseal -> smoke -> health.
+# workflow_dispatch with unseal_only skips migrate/build/deploy; still reconciles DNS and verifies the domain.
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       unseal_only:
-        description: Skip migrate/build/deploy; still reconcile DNS/TLS and verify vault.chrisvouga.dev
+        description: Skip migrate/build/deploy; still reconcile DNS and verify vault.chrisvouga.dev
         type: boolean
         default: false
 
@@ -38,6 +38,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+        working-directory: .
+
       - name: Install dependencies
         run: |
           set -euo pipefail
@@ -52,7 +56,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: bun run scripts/print-platform-env.ts --format github >> "$GITHUB_ENV"
+        working-directory: .
 
       - name: Run migrations
         if: github.event_name == 'push' || inputs.unseal_only != true
@@ -63,6 +68,9 @@ jobs:
           chmod +x scripts/migrate.sh
           ./scripts/migrate.sh
 
+      - uses: docker/setup-buildx-action@v4.0.0
+        if: github.event_name == 'push' || inputs.unseal_only != true
+
       - name: Log in to ghcr.io
         if: github.event_name == 'push' || inputs.unseal_only != true
         uses: docker/login-action@v4.1.0
@@ -70,9 +78,6 @@ jobs:
           registry: ghcr.io
           username: crvouga
           password: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
-
-      - uses: docker/setup-buildx-action@v4.0.0
-        if: github.event_name == 'push' || inputs.unseal_only != true
 
       - name: Build and push
         if: github.event_name == 'push' || inputs.unseal_only != true
@@ -116,38 +121,39 @@ jobs:
           done
           echo "Package chrisvouga-vault visibility not updated (may not exist yet on first push)"
 
-      - name: Sync Fly secrets
+      - name: Provision Railway service
         if: github.event_name == 'push' || inputs.unseal_only != true
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
-        run: flyctl secrets set DB_CONNECTION_URI="${DB_CONNECTION_URI}" --config fly.toml
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          chmod +x scripts/railway-provision.sh
+          ./scripts/railway-provision.sh
 
-      - name: Deploy to Fly
+      - name: Deploy to Railway
         if: github.event_name == 'push' || inputs.unseal_only != true
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --config fly.toml --wait-timeout 15m
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          chmod +x scripts/railway-deploy.sh
+          ./scripts/railway-deploy.sh
 
       - name: Reconcile DNS
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          chmod +x scripts/sync-dns.sh scripts/verify-custom-domain.sh scripts/ensure-fly-cert.sh
-          ./scripts/sync-dns.sh
-
-      - name: Ensure TLS certificate
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: ./scripts/ensure-fly-cert.sh
+          chmod +x scripts/railway-sync-dns.sh
+          ./scripts/railway-sync-dns.sh
 
       - name: Verify custom domain (pre-unseal)
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_HEALTHY: "false"
-        run: ./scripts/verify-custom-domain.sh
+        run: |
+          chmod +x scripts/verify-custom-domain.sh
+          ./scripts/verify-custom-domain.sh
 
       - name: Unseal OpenBao
         env:
@@ -169,7 +175,10 @@ jobs:
 
       - name: Health check custom domain
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_HEALTHY: "true"
         run: ./scripts/verify-custom-domain.sh
+
+      - name: Health-check vault
+        working-directory: .
+        run: bun run health-check --id vault

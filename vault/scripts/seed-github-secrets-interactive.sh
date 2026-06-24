@@ -10,7 +10,7 @@
 set -euo pipefail
 
 REQUIRED_SECRETS=(
-  "FLY_API_TOKEN|Fly.io deploy token (flyctl tokens create deploy -x 999999h)"
+  "RAILWAY_TOKEN|Railway account API token (https://railway.com/account/tokens)"
   "CF_API_TOKEN|Cloudflare API token, Zone:DNS:Edit for chrisvouga.dev (https://dash.cloudflare.com/profile/api-tokens)"
   "DB_CONNECTION_URI|Postgres connection string used for OpenBao storage + unseal key lookup"
 )

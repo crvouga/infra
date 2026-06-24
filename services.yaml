@@ -1,4 +1,4 @@
-# Single source of truth for Fly.io deployments.
+# Single source of truth for Railway deployments.
 # Images are built and pushed by each project repo — this repo only consumes them.
 
 zone: chrisvouga.dev
@@ -10,10 +10,11 @@ skip_rollout_repos:
   - crvouga/portfolio
   - crvouga/infra
 
-fly:
-  org: crvouga
-  app_prefix: crvouga
-  region: iad
+railway:
+  project: crvouga-infra
+  environment: production
+  region: us-east4
+  service_prefix: crvouga
 
 services:
   - id: portfolio
@@ -106,7 +107,8 @@ services:
     build_context: .
     port: 80
     health_check: true
-    # "/" redirects to /login/send-link; Fly checks do not follow redirects.
+    # "/" redirects to /login/send-link; health checks do not follow redirects.
+    # Railway rejects hyphens in healthcheckPath — deploy healthcheck skipped; external checks use this path.
     health_path: /login/send-link
 
   - id: connect-four
@@ -180,9 +182,7 @@ services:
     build_context: proxy
     port: 8080
     health_check: true
-    # "/" 302-redirects non-bot User-Agents to /ui — Fly's health-checker
-    # follows no redirects and treats the 302 as unhealthy, so the machine
-    # never goes healthy and requests that wake it from zero hang forever.
+    # "/" 302-redirects non-bot User-Agents to /ui — health checks must hit a 200 path.
     health_path: /ui
     env:
       PORT: "8080"
@@ -190,3 +190,21 @@ services:
       - name: DATABASE_URL
         source: vault
 
+  - id: vault
+    hostname: vault.chrisvouga.dev
+    standalone: true
+    github_repo: crvouga/infra
+    source_code_url: https://github.com/crvouga/infra/tree/main/vault
+    dockerfile: vault/Dockerfile
+    build_context: vault
+    port: 8200
+    health_check: true
+    # Query params are for external health checks; Railway uses path-only `/v1/sys/health`.
+    health_path: /v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200
+    railway:
+      sleep: false
+    env:
+      BAO_API_ADDR: "https://vault.chrisvouga.dev"
+    secrets:
+      - name: DB_CONNECTION_URI
+        source: vault
