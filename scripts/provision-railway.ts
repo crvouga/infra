@@ -21,7 +21,11 @@ import {
 } from "../lib/railway-api.js";
 import { ensureGhcrPackagePublic } from "../lib/ghcr.js";
 import { ensureRailwayGhcrPullCredentials } from "../lib/railway-ghcr.js";
-import { syncServiceVariablesToRailway } from "../lib/railway-secrets.js";
+import {
+  collectServiceVariables,
+  loadVaultSecretEnv,
+  syncServiceVariablesToRailway,
+} from "../lib/railway-secrets.js";
 import { ensureRailwayToken } from "../lib/railway-token.js";
 import {
   deployableServices,
@@ -130,10 +134,26 @@ async function provisionService(
     return;
   }
 
+  const failOnMissing = (service.secrets?.length ?? 0) > 0;
+  const vaultData = await loadVaultSecretEnv();
+  const { variables, missing } = collectServiceVariables(service, vaultData);
+  if (missing.length > 0 && failOnMissing) {
+    throw new Error(
+      `${service.id}: missing secrets: ${missing.join(", ")} (set in Vault prd or env)`,
+    );
+  }
+
   const railwayService = await ensureServiceFromImage({
     project,
     name: serviceName,
     image,
+    variables,
+  });
+
+  await syncServiceVariablesToRailway(service, {
+    skipDeploys: true,
+    failOnMissing,
+    vaultData,
   });
 
   await connectServiceImage(railwayService.id, image);
@@ -153,11 +173,6 @@ async function provisionService(
   await ensureRailwayGhcrPullCredentials({
     serviceId: railwayService.id,
     environmentId,
-  });
-
-  await syncServiceVariablesToRailway(service, {
-    skipDeploys: true,
-    failOnMissing: (service.secrets?.length ?? 0) > 0,
   });
 
   const volume = railwayVolume(service);

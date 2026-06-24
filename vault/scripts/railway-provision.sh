@@ -6,4 +6,5 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/railway-bootstrap.sh"
 
 require_railway_token
+require_db_connection_uri
 run_bun run provision-railway --id vault --apply "$@"

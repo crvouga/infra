@@ -207,4 +207,4 @@ services:
       BAO_API_ADDR: "https://vault.chrisvouga.dev"
     secrets:
       - name: DB_CONNECTION_URI
-        source: vault
+        source: env

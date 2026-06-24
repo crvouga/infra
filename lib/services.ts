@@ -3,6 +3,8 @@ import { parse as parseYaml } from "yaml";
 
 export type SecretSource =
   | { readonly source: "vault" }
+  /** Bootstrap / CI only — resolved from process.env, not Vault KV. */
+  | { readonly source: "env" }
   | { readonly source: "github" }
   | { readonly source: "literal"; readonly value: string };
 

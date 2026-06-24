@@ -52,6 +52,8 @@ function resolveSecret(
     if (aliasEnv) return aliasEnv;
   }
 
+  if (spec.source === "env") return null;
+
   if (spec.source === "vault") {
     const fromVault = vaultData[spec.name]?.trim();
     if (fromVault) return fromVault;

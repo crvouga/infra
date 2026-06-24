@@ -125,6 +125,7 @@ jobs:
         if: github.event_name == 'push' || inputs.unseal_only != true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          DB_CONNECTION_URI: ${{ secrets.DB_CONNECTION_URI }}
         run: |
           chmod +x scripts/railway-provision.sh
           ./scripts/railway-provision.sh

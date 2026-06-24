@@ -38,6 +38,15 @@ require_cf_token() {
   fi
 }
 
+require_db_connection_uri() {
+  if [ -n "${DB_CONNECTION_URI:-}" ]; then
+    export DB_CONNECTION_URI
+    return 0
+  fi
+  echo "ERROR: DB_CONNECTION_URI is required (export it or set GitHub secret DB_CONNECTION_URI in CI)" >&2
+  exit 1
+}
+
 run_bun() {
   bun "$@"
 }

@@ -277,5 +277,6 @@ CI workflow: infra repo `.github/workflows/vault-deploy.yml` (not a nested `vaul
 | Smoke test returns 503 | OpenBao is sealed — run manual unseal or `gh workflow run vault-deploy.yml -f unseal_only=true` |
 | DNS not resolving | `cd vault && make sync-dns` (needs `CF_API_TOKEN`) or re-run **Vault deploy**; flush local cache: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder` |
 | `vault run` / sync-dns fails with missing prd KV | Bootstrap vault with env exports + `make deploy`; re-seed `secret/personal/prd` after init |
-| DB connection errors | Verify `DB_CONNECTION_URI` in Vault / infra env sync |
+| Container crash loop: `DB_CONNECTION_URI is required` | Export `DB_CONNECTION_URI` and re-run `make deploy` (syncs to Railway before image deploy). CI needs the GitHub secret on both provision and deploy steps. |
+| DB connection errors | Verify `DB_CONNECTION_URI` GitHub secret / Railway service variables |
 | Migration job fails | Check `DB_CONNECTION_URI` GitHub secret; ensure Neon allows GitHub Actions IPs |
