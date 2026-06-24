@@ -49,6 +49,25 @@ function ghcrVisibilityUrls(owner: string, packageName: string, repoSlug?: strin
   return urls;
 }
 
+async function isGhcrPubliclyPullable(owner: string, packageName: string): Promise<boolean> {
+  const tokenUrl =
+    `https://ghcr.io/token?service=ghcr.io&scope=repository:${owner}/${packageName}:pull`;
+  const tokenRes = await fetch(tokenUrl);
+  if (!tokenRes.ok) return false;
+
+  const tokenPayload = (await tokenRes.json().catch(() => null)) as { token?: string } | null;
+  const token = tokenPayload?.token;
+  if (!token) return false;
+
+  const manifestRes = await fetch(`https://ghcr.io/v2/${owner}/${packageName}/manifests/latest`, {
+    headers: {
+      Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return manifestRes.ok;
+}
+
 export async function setGhcrPackagePublic(
   owner: string,
   packageName: string,
@@ -68,8 +87,8 @@ export async function setGhcrPackagePublic(
     return false;
   }
 
-  let lastError = "";
-  for (const token of tokens) {
+  const errors: string[] = [];
+  for (const [tokenIndex, token] of tokens.entries()) {
     for (const url of urls) {
       const res = await fetch(url, {
         method: "PATCH",
@@ -82,7 +101,7 @@ export async function setGhcrPackagePublic(
         body: JSON.stringify({ visibility: "public" }),
       });
       if (res.status === 404) {
-        lastError = `not found at ${url}`;
+        errors.push(`token ${tokenIndex + 1}: 404 at ${url}`);
         continue;
       }
       if (res.ok) {
@@ -90,11 +109,16 @@ export async function setGhcrPackagePublic(
         return true;
       }
       const text = await res.text();
-      lastError = `HTTP ${res.status} at ${url}: ${text.slice(0, 200)}`;
+      errors.push(`token ${tokenIndex + 1}: HTTP ${res.status} at ${url}: ${text.slice(0, 200)}`);
     }
   }
 
-  console.warn(`  skip GHCR public ${packageName}: ${lastError}`);
+  if (await isGhcrPubliclyPullable(owner, packageName)) {
+    console.log(`  GHCR public ${owner}/${packageName} (verified by anonymous pull token)`);
+    return true;
+  }
+
+  console.warn(`  skip GHCR public ${packageName}: ${errors.join("; ")}`);
   return false;
 }
 

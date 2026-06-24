@@ -1,5 +1,8 @@
 FROM quay.io/openbao/openbao:latest
 
+LABEL org.opencontainers.image.source="https://github.com/crvouga/infra"
+LABEL org.opencontainers.image.description="Standalone OpenBao vault for chrisvouga.dev"
+
 USER root
 
 COPY config/openbao.hcl /etc/openbao/openbao.hcl

@@ -41,6 +41,7 @@ jobs:
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
       DEPLOY_DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
     steps:
       - uses: actions/checkout@v5
@@ -93,6 +94,9 @@ jobs:
           platforms: linux/amd64
           push: true
           provenance: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/crvouga/infra
+            org.opencontainers.image.description=Standalone OpenBao vault for chrisvouga.dev
           tags: |
             ghcr.io/crvouga/chrisvouga-vault:latest
             ghcr.io/crvouga/chrisvouga-vault:${{ github.sha }}
