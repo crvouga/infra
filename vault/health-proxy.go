@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	listenAddr := envOrDefault("HEALTH_PROXY_ADDR", ":8200")
+	listenAddr := envOrDefault("HEALTH_PROXY_ADDR", defaultListenAddr())
 	targetAddr := envOrDefault("OPENBAO_UPSTREAM_ADDR", "http://127.0.0.1:8201")
 
 	target, err := url.Parse(targetAddr)
@@ -38,4 +38,12 @@ func envOrDefault(name string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func defaultListenAddr() string {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8200"
+	}
+	return ":" + port
 }

@@ -686,7 +686,10 @@ async function deploymentFailureDetails(deploymentId: string): Promise<string> {
     if (data.deployment?.meta) {
       lines.push(`Meta: ${JSON.stringify(data.deployment.meta).slice(0, 1_000)}`);
     }
-    const deploymentLogs = data.deploymentLogs.slice(-20);
+    const deploymentLogs = [
+      ...data.deploymentLogs.slice(0, 10),
+      ...data.deploymentLogs.slice(-30),
+    ];
     if (deploymentLogs.length > 0) {
       lines.push("Deployment logs:");
       for (const log of deploymentLogs) {
