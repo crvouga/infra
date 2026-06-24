@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	listenAddr := envOrDefault("HEALTH_PROXY_ADDR", defaultListenAddr())
+	listenAddrs := listenAddrs()
 	targetAddr := envOrDefault("OPENBAO_UPSTREAM_ADDR", "http://127.0.0.1:8201")
 
 	target, err := url.Parse(targetAddr)
@@ -26,8 +26,15 @@ func main() {
 	})
 	mux.Handle("/", proxy)
 
-	log.Printf("health proxy listening on %s, proxying to %s", listenAddr, target)
-	if err := http.ListenAndServe(listenAddr, mux); err != nil {
+	errs := make(chan error, len(listenAddrs))
+	for _, listenAddr := range listenAddrs {
+		go func(addr string) {
+			log.Printf("health proxy listening on %s, proxying to %s", addr, target)
+			errs <- http.ListenAndServe(addr, mux)
+		}(listenAddr)
+	}
+
+	if err := <-errs; err != nil {
 		log.Fatalf("health proxy failed: %v", err)
 	}
 }
@@ -40,10 +47,15 @@ func envOrDefault(name string, fallback string) string {
 	return value
 }
 
-func defaultListenAddr() string {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8200"
+func listenAddrs() []string {
+	if override := os.Getenv("HEALTH_PROXY_ADDR"); override != "" {
+		return []string{override}
 	}
-	return ":" + port
+
+	addrs := []string{":8200"}
+	port := os.Getenv("PORT")
+	if port != "" && port != "8200" {
+		addrs = append(addrs, ":"+port)
+	}
+	return addrs
 }
