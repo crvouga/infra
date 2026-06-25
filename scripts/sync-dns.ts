@@ -76,6 +76,9 @@ function parseArgs(argv: readonly string[]): Args {
       process.exit(2);
     }
   }
+  // Targeted sync must not prune other hostnames' verification records.
+  if (ids.length > 0) pruneOrphans = false;
+
   return { ids: ids.filter(Boolean), apply, proxied, pruneOrphans, waitForCerts };
 }
 
@@ -116,14 +119,25 @@ function toDesiredRecords(
   }));
 }
 
-async function resolveDomainForService(
-  config: ServicesConfig,
-  service: DnsTarget,
-): Promise<RailwayCustomDomain> {
+type RailwayDnsContext = Awaited<ReturnType<typeof resolveProjectContext>> & {
+  readonly environment: ReturnType<typeof resolveEnvironment>;
+};
+
+async function loadRailwayDnsContext(config: ServicesConfig): Promise<RailwayDnsContext> {
   const projectName = railwayProjectName(config);
   const environmentName = railwayEnvironmentName(config);
   const ctx = await resolveProjectContext(projectName, environmentName);
-  const environment = resolveEnvironment(ctx.project, environmentName);
+  return {
+    ...ctx,
+    environment: resolveEnvironment(ctx.project, environmentName),
+  };
+}
+
+async function resolveDomainForService(
+  config: ServicesConfig,
+  service: DnsTarget,
+  ctx: RailwayDnsContext,
+): Promise<RailwayCustomDomain> {
   const railwayService = findServiceByName(ctx.project, railwayServiceName(config, service.id));
   if (!railwayService) {
     throw new Error(
@@ -134,11 +148,29 @@ async function resolveDomainForService(
   const serviceSpec = config.services.find((s) => s.id === service.id);
   return ensureCustomDomain({
     projectId: ctx.projectId,
-    environmentId: environment.id,
+    environmentId: ctx.environment.id,
     serviceId: railwayService.id,
     domain: service.hostname,
     targetPort: serviceSpec?.port,
   });
+}
+
+async function resolveDomainsForServices(
+  config: ServicesConfig,
+  services: readonly DnsTarget[],
+): Promise<Map<string, RailwayCustomDomain>> {
+  const ctx = await loadRailwayDnsContext(config);
+  const domains = new Map<string, RailwayCustomDomain>();
+
+  for (const service of services) {
+    domains.set(service.id, await resolveDomainForService(config, service, ctx));
+    // Railway throttles bursty GraphQL; pace lookups during fleet sync.
+    if (services.length > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  return domains;
 }
 
 type Action =
@@ -213,6 +245,7 @@ async function planActions(
   config: ServicesConfig,
   services: readonly DnsTarget[],
   args: Args,
+  domainsByServiceId: ReadonlyMap<string, RailwayCustomDomain>,
 ): Promise<readonly Action[]> {
   const zone = config.zone;
   const byNameType = new Map<string, CloudflareDnsRecord[]>();
@@ -227,7 +260,10 @@ async function planActions(
   const desiredKeys = new Set<string>();
 
   for (const service of services) {
-    const domain = await resolveDomainForService(config, service);
+    const domain = domainsByServiceId.get(service.id);
+    if (!domain) {
+      throw new Error(`Missing Railway custom domain for service "${service.id}"`);
+    }
     const desired = toDesiredRecords(config, domain);
     for (const target of desired) {
       desiredKeys.add(recordKey(target, zone));
@@ -418,8 +454,9 @@ async function main(): Promise<void> {
     `Sync DNS (${args.apply ? "APPLY" : "DRY-RUN"}) platform=railway zone=${config.zone} services=${services.length} proxied=${args.proxied}`,
   );
 
+  const domainsByServiceId = await resolveDomainsForServices(config, services);
   const records = await cf.listDnsRecords(zone.id);
-  const actions = await planActions(records, config, services, args);
+  const actions = await planActions(records, config, services, args, domainsByServiceId);
 
   await reconcileSslMode(cf, zone.id, args.apply);
 

@@ -110,13 +110,11 @@ jobs:
       - name: Reconcile DNS
         env:
           RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
-          SERVICE_ID: ${{ needs.prepare.outputs.service_id }}
           CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
         run: |
           set -euo pipefail
           ARGS=()
           if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
-          if [ -n "${SERVICE_ID}" ]; then ARGS+=(--id "${SERVICE_ID}"); fi
           bun run sync-dns "${ARGS[@]}"
       - name: Ensure apex redirect
         env:

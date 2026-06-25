@@ -61,45 +61,85 @@ export type RailwayProjectContext = {
   readonly environmentId: string;
 };
 
+function parseRetryAfterMs(response: Response, body: string): number | undefined {
+  const header = response.headers.get("retry-after")?.trim();
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  }
+
+  const match = body.match(/try again in (\d+(?:\.\d+)?) seconds/i);
+  if (match) {
+    const seconds = Number(match[1]);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  }
+
+  return undefined;
+}
+
+function railwayRetryDelayMs(response: Response, body: string, attempt: number): number {
+  const retryAfterMs = parseRetryAfterMs(response, body);
+  if (retryAfterMs != null) return Math.min(retryAfterMs, 120_000);
+  return Math.min(1_000 * 2 ** attempt, 30_000);
+}
+
 async function railwayRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
   const token = requireRailwayToken();
-  const response = await fetch(RAILWAY_GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  const maxAttempts = 5;
 
-  const body = await response.text();
-  let payload: GraphQLResponse<T>;
-  try {
-    payload = JSON.parse(body) as GraphQLResponse<T>;
-  } catch {
-    throw new RailwayApiError(`Railway API HTTP ${response.status}: ${body.slice(0, 500)}`);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetch(RAILWAY_GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+
+    const body = await response.text();
+    let payload: GraphQLResponse<T>;
+    try {
+      payload = JSON.parse(body) as GraphQLResponse<T>;
+    } catch {
+      if ((response.status === 429 || response.status === 503) && attempt < maxAttempts - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, railwayRetryDelayMs(response, body, attempt)),
+        );
+        continue;
+      }
+      throw new RailwayApiError(`Railway API HTTP ${response.status}: ${body.slice(0, 500)}`);
+    }
+
+    if (!response.ok) {
+      if ((response.status === 429 || response.status === 503) && attempt < maxAttempts - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, railwayRetryDelayMs(response, body, attempt)),
+        );
+        continue;
+      }
+      const detail =
+        payload.errors?.map((e) => e.message).join("; ") ||
+        body.slice(0, 500);
+      throw new RailwayApiError(`Railway API HTTP ${response.status}: ${detail}`, payload.errors ?? []);
+    }
+
+    if (payload.errors?.length) {
+      throw new RailwayApiError(
+        payload.errors.map((e) => e.message).join("; "),
+        payload.errors,
+      );
+    }
+    if (!payload.data) {
+      throw new RailwayApiError("Railway API returned no data");
+    }
+    return payload.data;
   }
 
-  if (!response.ok) {
-    const detail =
-      payload.errors?.map((e) => e.message).join("; ") ||
-      body.slice(0, 500);
-    throw new RailwayApiError(`Railway API HTTP ${response.status}: ${detail}`, payload.errors ?? []);
-  }
-
-  if (payload.errors?.length) {
-    throw new RailwayApiError(
-      payload.errors.map((e) => e.message).join("; "),
-      payload.errors,
-    );
-  }
-  if (!payload.data) {
-    throw new RailwayApiError("Railway API returned no data");
-  }
-  return payload.data;
+  throw new RailwayApiError("Railway API request failed after retries");
 }
 
 function nodes<T>(connection: Connection<T> | null | undefined): readonly T[] {
