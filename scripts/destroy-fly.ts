@@ -14,6 +14,13 @@ import {
 } from "../lib/services.js";
 import { requireFlyApiToken } from "../lib/fly-token.js";
 
+const ALWAYS_DESTROY_FLY_APPS = [
+  // Removed/standalone services that may still exist as old Fly apps.
+  "crvouga-filestash",
+  "crvouga-pgweb",
+  "crvouga-vault",
+] as const;
+
 type Args = {
   readonly apply: boolean;
 };
@@ -60,7 +67,12 @@ async function destroyApp(app: string, apply: boolean): Promise<void> {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const config = loadServicesConfig();
-  const apps = deployableServices(config).map((service) => railwayServiceName(config, service.id));
+  const apps = [
+    ...new Set([
+      ...deployableServices(config).map((service) => railwayServiceName(config, service.id)),
+      ...ALWAYS_DESTROY_FLY_APPS,
+    ]),
+  ];
 
   console.log(`Destroy Fly apps (${args.apply ? "APPLY" : "DRY-RUN"}) count=${apps.length}`);
   requireFlyApiToken();
