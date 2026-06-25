@@ -277,15 +277,18 @@ export async function ensureServiceFromImage(input: {
   readonly name: string;
   readonly image: string;
   readonly variables?: Record<string, string>;
-}): Promise<{ readonly id: string; readonly name: string }> {
+}): Promise<{ readonly service: { readonly id: string; readonly name: string }; readonly created: boolean }> {
   const existing = findServiceByName(input.project, input.name);
-  if (existing) return existing;
-  return createServiceFromImage({
+  if (existing) {
+    return { service: existing, created: false };
+  }
+  const service = await createServiceFromImage({
     projectId: input.project.id,
     name: input.name,
     image: input.image,
     variables: input.variables,
   });
+  return { service, created: true };
 }
 
 export async function updateServiceInstance(input: {

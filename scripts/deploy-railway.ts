@@ -9,15 +9,11 @@
  */
 import {
   connectServiceImage,
-  deployService,
   ensureProject,
   findServiceByName,
-  redeployService,
   resolveEnvironment,
   updateServiceInstance,
-  waitForDeployment,
 } from "../lib/railway-api.js";
-import { syncServiceVariablesToRailway } from "../lib/railway-secrets.js";
 import { ensureRailwayToken } from "../lib/railway-token.js";
 import { waitForServiceHealthy } from "../lib/service-health.js";
 import {
@@ -81,7 +77,6 @@ async function deployOne(
   const image = imageRef(config, service.id, imageTag);
 
   console.log(`\nDeploy ${service.id} → ${image}`);
-  await syncServiceVariablesToRailway(service, { skipDeploys: false, failOnMissing: true });
 
   const project = await ensureProject(projectName);
   const environment = resolveEnvironment(project, environmentName);
@@ -93,8 +88,7 @@ async function deployOne(
   }
 
   const healthcheckPath = railwayHealthcheckSetting(service);
-  const applyInstanceSettings = async (): Promise<void> => {
-    if (healthcheckPath === undefined) return;
+  if (healthcheckPath !== undefined) {
     await updateServiceInstance({
       serviceId: railwayService.id,
       environmentId: environment.id,
@@ -102,22 +96,9 @@ async function deployOne(
       sleepApplication: railwaySleep(service),
       region: railwayRegion(config),
     });
-  };
+  }
 
-  await applyInstanceSettings();
   await connectServiceImage(railwayService.id, image);
-  await applyInstanceSettings();
-
-  let deploymentId: string | undefined;
-  try {
-    deploymentId = await deployService(railwayService.id, environment.id);
-  } catch {
-    await redeployService(railwayService.id, environment.id);
-  }
-
-  if (deploymentId) {
-    await waitForDeployment(deploymentId);
-  }
 
   if (!skipHealth && service.health_check) {
     await waitForServiceHealthy(config, service);

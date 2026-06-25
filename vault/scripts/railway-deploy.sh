@@ -9,5 +9,5 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 require_railway_token
 require_db_connection_uri
-run_bun run sync-railway-secrets --id vault --redeploy
+run_bun run sync-railway-secrets --id vault
 run_bun run deploy-railway --id vault --image-tag "${IMAGE_TAG}" --skip-health "$@"

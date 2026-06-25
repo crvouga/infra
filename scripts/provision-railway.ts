@@ -145,7 +145,7 @@ async function provisionService(
     );
   }
 
-  const railwayService = await ensureServiceFromImage({
+  const { service: railwayService, created } = await ensureServiceFromImage({
     project,
     name: serviceName,
     image,
@@ -153,22 +153,20 @@ async function provisionService(
   });
 
   await syncServiceVariablesToRailway(service, {
-    skipDeploys: false,
+    skipDeploys: true,
     failOnMissing,
     vaultData,
   });
 
   const railwayHealthPath = railwayHealthcheckSetting(service);
-  const applyInstanceSettings = async (): Promise<void> => {
-    await updateServiceInstance({
-      serviceId: railwayService.id,
-      environmentId,
-      healthcheckPath: railwayHealthPath,
-      sleepApplication: railwaySleep(service),
-      region: railwayRegion(config),
-      numReplicas: 1,
-    });
-  };
+  await updateServiceInstance({
+    serviceId: railwayService.id,
+    environmentId,
+    healthcheckPath: railwayHealthPath,
+    sleepApplication: railwaySleep(service),
+    region: railwayRegion(config),
+    numReplicas: 1,
+  });
 
   await ensureGhcrPackagePublic(config, service.id);
 
@@ -177,9 +175,9 @@ async function provisionService(
     environmentId,
   });
 
-  await applyInstanceSettings();
-  await connectServiceImage(railwayService.id, image);
-  await applyInstanceSettings();
+  if (created) {
+    await connectServiceImage(railwayService.id, image);
+  }
 
   const volume = railwayVolume(service);
   if (volume && !args.skipVolumes) {

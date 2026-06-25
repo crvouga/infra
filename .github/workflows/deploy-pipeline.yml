@@ -8,7 +8,7 @@ name: Deploy Pipeline
 # Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
 #
 # Triggers:
-#   - push to main
+#   - push to main (checks, DNS, GHCR — no fleet redeploy)
 #   - repository_dispatch (deploy-service)
 #   - workflow_dispatch
 
@@ -134,6 +134,7 @@ jobs:
           bun run sync-aliases "${ARGS[@]}"
 
   railway-deploy:
+    if: github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: prepare
     strategy:
@@ -148,10 +149,6 @@ jobs:
       - uses: ./.github/actions/vault-secrets
         with:
           vault_addr: ${{ env.VAULT_ADDR }}
-      - name: Ensure Railway service exists
-        env:
-          RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
-        run: bun run provision-railway --id "${{ matrix.service_id }}" --apply
       - name: Sync Railway secrets
         env:
           RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
@@ -183,6 +180,7 @@ jobs:
   health-check-all:
     runs-on: ubuntu-latest
     needs: [prepare, railway-deploy]
+    if: always() && needs.prepare.result == 'success' && (needs.railway-deploy.result == 'success' || needs.railway-deploy.result == 'skipped')
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
