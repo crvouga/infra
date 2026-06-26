@@ -116,8 +116,10 @@ services:
     source_code_url: https://github.com/crvouga/connect-four
     dockerfile: ./Dockerfile
     build_context: .
-    port: 80
+    port: 8080
     health_check: true
+    env:
+      PORT: "8080"
 
   - id: anime-blog
     hostname: anime.chrisvouga.dev

@@ -616,6 +616,21 @@ export async function listCustomDomains(input: {
   return data.domains.customDomains;
 }
 
+export async function updateCustomDomainTargetPort(input: {
+  readonly id: string;
+  readonly environmentId: string;
+  readonly targetPort: number;
+}): Promise<void> {
+  await railwayRequest<{ customDomainUpdate: boolean }>(
+    `
+    mutation customDomainUpdate($id: String!, $environmentId: String!, $targetPort: Int) {
+      customDomainUpdate(id: $id, environmentId: $environmentId, targetPort: $targetPort)
+    }
+  `,
+    input,
+  );
+}
+
 export async function ensureCustomDomain(input: {
   readonly projectId: string;
   readonly environmentId: string;
@@ -625,7 +640,16 @@ export async function ensureCustomDomain(input: {
 }): Promise<RailwayCustomDomain> {
   const existing = await listCustomDomains(input);
   const match = existing.find((d) => d.domain === input.domain);
-  if (match) return match;
+  if (match) {
+    if (input.targetPort != null) {
+      await updateCustomDomainTargetPort({
+        id: match.id,
+        environmentId: input.environmentId,
+        targetPort: input.targetPort,
+      });
+    }
+    return match;
+  }
   return createCustomDomain(input);
 }
 
