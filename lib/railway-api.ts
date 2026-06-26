@@ -631,6 +631,61 @@ export async function updateCustomDomainTargetPort(input: {
   );
 }
 
+export async function deleteCustomDomain(id: string): Promise<void> {
+  await railwayRequest<{ customDomainDelete: boolean }>(
+    `
+    mutation customDomainDelete($id: String!) {
+      customDomainDelete(id: $id)
+    }
+  `,
+    { id },
+  );
+  invalidateRailwayCache();
+}
+
+type CustomDomainLocation = RailwayCustomDomain & { readonly serviceId: string };
+
+async function findCustomDomainInProject(input: {
+  readonly projectId: string;
+  readonly environmentId: string;
+  readonly domain: string;
+  readonly services: readonly { readonly id: string }[];
+}): Promise<CustomDomainLocation | undefined> {
+  for (const service of input.services) {
+    const domains = await listCustomDomains({
+      projectId: input.projectId,
+      environmentId: input.environmentId,
+      serviceId: service.id,
+    });
+    const match = domains.find((d) => d.domain === input.domain);
+    if (match) {
+      return { ...match, serviceId: service.id };
+    }
+  }
+  return undefined;
+}
+
+function isCustomDomainConflictError(err: unknown): boolean {
+  if (!(err instanceof RailwayApiError)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("failed to create custom domain") || msg.includes("already exists");
+}
+
+async function adoptCustomDomain(
+  domain: RailwayCustomDomain,
+  environmentId: string,
+  targetPort?: number,
+): Promise<RailwayCustomDomain> {
+  if (targetPort != null) {
+    await updateCustomDomainTargetPort({
+      id: domain.id,
+      environmentId,
+      targetPort,
+    });
+  }
+  return domain;
+}
+
 export async function ensureCustomDomain(input: {
   readonly projectId: string;
   readonly environmentId: string;
@@ -638,19 +693,39 @@ export async function ensureCustomDomain(input: {
   readonly domain: string;
   readonly targetPort?: number;
 }): Promise<RailwayCustomDomain> {
-  const existing = await listCustomDomains(input);
-  const match = existing.find((d) => d.domain === input.domain);
-  if (match) {
-    if (input.targetPort != null) {
-      await updateCustomDomainTargetPort({
-        id: match.id,
-        environmentId: input.environmentId,
-        targetPort: input.targetPort,
-      });
+  const onService = await listCustomDomains(input);
+  const local = onService.find((d) => d.domain === input.domain);
+  if (local) return adoptCustomDomain(local, input.environmentId, input.targetPort);
+
+  const project = await getProject(input.projectId);
+  const services = nodes(project.services);
+  const located = await findCustomDomainInProject({
+    projectId: input.projectId,
+    environmentId: input.environmentId,
+    domain: input.domain,
+    services,
+  });
+
+  if (located) {
+    if (located.serviceId === input.serviceId) {
+      return adoptCustomDomain(located, input.environmentId, input.targetPort);
     }
-    return match;
+    await deleteCustomDomain(located.id);
   }
-  return createCustomDomain(input);
+
+  try {
+    return await createCustomDomain(input);
+  } catch (err) {
+    if (!isCustomDomainConflictError(err)) throw err;
+    const retry = await findCustomDomainInProject({
+      projectId: input.projectId,
+      environmentId: input.environmentId,
+      domain: input.domain,
+      services,
+    });
+    if (!retry || retry.serviceId !== input.serviceId) throw err;
+    return adoptCustomDomain(retry, input.environmentId, input.targetPort);
+  }
 }
 
 export async function issueCustomDomainCertificate(customDomainId: string): Promise<void> {
