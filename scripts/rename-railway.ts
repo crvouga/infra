@@ -11,6 +11,7 @@
  *   bun run scripts/rename-railway.ts --old-project crvouga-infra --old-prefix crvouga --apply
  */
 import {
+  deleteProject,
   findServiceByName,
   getProject,
   isRailwayRateLimitError,
@@ -84,15 +85,65 @@ async function withRateLimitRetry<T>(
   }
 }
 
+function projectServiceNames(project: RailwayProject): readonly string[] {
+  return project.services.edges?.map((edge) => edge.node.name) ?? [];
+}
+
+async function removeStrayDuplicateProject(
+  oldProjectName: string,
+  newProjectName: string,
+  apply: boolean,
+  waitOnRateLimit: boolean,
+): Promise<void> {
+  const projects = await listProjects();
+  const oldMatch = projects.find((p) => p.name === oldProjectName);
+  const newMatch = projects.find((p) => p.name === newProjectName);
+  if (!oldMatch || !newMatch || oldMatch.id === newMatch.id) return;
+
+  const stray = await getProject(newMatch.id);
+  const services = projectServiceNames(stray);
+  const serviceList = services.length > 0 ? services.join(", ") : "(none)";
+  const line = `delete stray project ${newProjectName} (id ${newMatch.id}, services: ${serviceList})`;
+
+  if (!apply) {
+    console.log(`  [plan] ${line}`);
+    if (services.includes("vault")) {
+      console.log(`  [plan] re-provision vault after rename: cd vault && make provision`);
+    }
+    return;
+  }
+
+  console.log(`  Deleting stray project ${newProjectName}…`);
+  await withRateLimitRetry(waitOnRateLimit, async () => {
+    await deleteProject(newMatch.id);
+  });
+  console.log(`  [done] ${line}`);
+  if (services.includes("vault")) {
+    console.log(`  note   re-provision vault: cd vault && make provision`);
+  }
+}
+
 async function loadTargetProject(
   oldProjectName: string,
   newProjectName: string,
+  apply: boolean,
   waitOnRateLimit: boolean,
 ): Promise<RailwayProject> {
   console.log("  Loading Railway projects…");
   return withRateLimitRetry(waitOnRateLimit, async () => {
+    await removeStrayDuplicateProject(oldProjectName, newProjectName, apply, waitOnRateLimit);
+
     const projects = await listProjects();
-    const match = projects.find((p) => p.name === oldProjectName || p.name === newProjectName);
+    const oldMatch = projects.find((p) => p.name === oldProjectName);
+    const newMatch = projects.find((p) => p.name === newProjectName);
+
+    if (oldMatch && newMatch && oldMatch.id !== newMatch.id) {
+      throw new Error(
+        `Both Railway projects "${oldProjectName}" and "${newProjectName}" still exist after cleanup — retry or delete "${newProjectName}" manually`,
+      );
+    }
+
+    const match = oldMatch ?? newMatch;
     if (!match) {
       throw new Error(
         `Railway project "${oldProjectName}" or "${newProjectName}" not found — nothing to rename`,
@@ -114,7 +165,12 @@ async function main(): Promise<void> {
 
   await ensureRailwayToken();
 
-  let project = await loadTargetProject(args.oldProject, newProjectName, args.waitOnRateLimit);
+  let project = await loadTargetProject(
+    args.oldProject,
+    newProjectName,
+    args.apply,
+    args.waitOnRateLimit,
+  );
 
   if (project.name === args.oldProject && args.oldProject !== newProjectName) {
     const line = `project ${args.oldProject} → ${newProjectName}`;
