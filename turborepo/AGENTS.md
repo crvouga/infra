@@ -31,7 +31,7 @@ Required keys (manual): `TURBO_TOKEN`, `VAULT_TOKEN`, B2 `B2_*`.
 | `bun run setup`                   | `apps/api/.env` + ensure Vault defaults in dev/prd |
 | `bun run check:vault-secrets`     | Verify dev config (CI gate)                        |
 | `bun run check:vault-secrets:prd` | Verify prd config (deploy gate)                    |
-| `bun run deploy`                  | Points to infra publish-turborepo workflow           |
+| `bun run deploy`                  | Points to infra publish-turborepo workflow         |
 
 ## CI/CD
 
