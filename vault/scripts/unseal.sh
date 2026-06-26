@@ -215,32 +215,55 @@ if check_unsealed; then
   exit 0
 fi
 
-echo "==> Applying ${UNSEAL_THRESHOLD} unseal key(s) (threshold from seal-status)..."
+count_available_keys() {
+  echo "$KEYS_JSON" | jq -r '
+    if (.keys_base64 | type) == "array" then (.keys_base64 | length)
+    elif (.unseal_keys_b64 | type) == "array" then (.unseal_keys_b64 | length)
+    elif (.keys | type) == "array" then (.keys | length)
+    else
+      ([range(1; 20) | select(.["key_" + (. | tostring)] != null)] | length)
+    end
+  '
+}
+
+KEY_COUNT="$(count_available_keys)"
+if [ -z "$KEY_COUNT" ] || [ "$KEY_COUNT" = "0" ] || [ "$KEY_COUNT" = "null" ]; then
+  echo "ERROR: No unseal keys found in crvouga.kv payload" >&2
+  exit 1
+fi
+
+echo "==> Applying unseal keys (threshold=${UNSEAL_THRESHOLD}, stored=${KEY_COUNT})..."
 dump_seal_status "before"
 
 # Track fingerprints to catch duplicate shares (a top cause of "still sealed").
 SEEN_FINGERPRINTS=""
 PREV_PROGRESS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null | jq -r '.progress // 0')"
+KEYS_TRIED=0
 
-for i in $(seq 1 "$UNSEAL_THRESHOLD"); do
+for i in $(seq 1 "$KEY_COUNT"); do
+  if check_unsealed; then
+    echo "==> OpenBao unsealed successfully."
+    exit 0
+  fi
+
   KEY="$(extract_unseal_key "$KEYS_JSON" "$i" || true)"
   if [ -z "$KEY" ]; then
-    echo "ERROR: unseal key ${i} missing from crvouga.kv (need ${UNSEAL_THRESHOLD} key(s))" >&2
-    echo "       Expected keys_base64[], unseal_keys_b64[], or key_${i} in v." >&2
-    exit 1
+    echo "    [debug] skip key slot ${i}/${KEY_COUNT} (empty)" >&2
+    continue
   fi
 
   KEY_FP="$(fingerprint_key "$KEY")"
-  echo "    Unseal key ${i}/${UNSEAL_THRESHOLD} [debug] ${KEY_FP}"
-
   KEY_SUM="${KEY_FP##*sha256=}"
   case " ${SEEN_FINGERPRINTS} " in
     *" ${KEY_SUM} "*)
-      echo "    [debug] WARNING: key ${i} is a DUPLICATE of an earlier key (same sha256=${KEY_SUM})." >&2
-      echo "    [debug] OpenBao ignores duplicate shares, so progress will not advance." >&2
+      echo "    Unseal key ${i}/${KEY_COUNT} [debug] ${KEY_FP} (duplicate — skip)" >&2
+      continue
       ;;
   esac
   SEEN_FINGERPRINTS="${SEEN_FINGERPRINTS} ${KEY_SUM}"
+  KEYS_TRIED=$((KEYS_TRIED + 1))
+
+  echo "    Unseal key ${i}/${KEY_COUNT} [debug] ${KEY_FP}"
 
   UNSEAL_OUTPUT="$(vault_cmd operator unseal "$KEY" 2>&1)" || {
     echo "$UNSEAL_OUTPUT" >&2
@@ -251,25 +274,20 @@ for i in $(seq 1 "$UNSEAL_THRESHOLD"); do
     exit 1
   }
 
-  # CLI defaults to table output; query seal-status API for JSON.
   STATUS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null || echo '{}')"
   SEALED="$(echo "$STATUS" | jq -r '.sealed // true')"
   PROGRESS="$(echo "$STATUS" | jq -r '.progress // 0')"
   echo "    [debug] progress after key ${i}: ${PREV_PROGRESS} -> ${PROGRESS} (sealed=${SEALED})" >&2
 
-  # Reaching the threshold resets progress to 0 as the node unseals. That flip
-  # is async, so poll briefly before moving on or warning.
   if wait_unsealed 10; then
     echo "==> OpenBao unsealed successfully."
     exit 0
   fi
 
   if [ "$PROGRESS" = "$PREV_PROGRESS" ] && [ "$PROGRESS" != "0" ]; then
-    echo "    [debug] WARNING: progress did NOT advance after key ${i} — likely a" >&2
-    echo "    [debug] duplicate share or a key from a different (stale) init." >&2
-  elif [ "$PROGRESS" = "0" ] && [ "$i" -lt "$UNSEAL_THRESHOLD" ]; then
-    echo "    [debug] WARNING: progress reset to 0 before reaching threshold after" >&2
-    echo "    [debug] key ${i} — this key is likely INVALID for this seal." >&2
+    echo "    [debug] WARNING: progress did NOT advance — trying next stored key." >&2
+  elif [ "$PROGRESS" = "0" ] && [ "$KEYS_TRIED" -lt "$UNSEAL_THRESHOLD" ]; then
+    echo "    [debug] WARNING: progress reset to 0 before reaching threshold — key may be invalid." >&2
   fi
   PREV_PROGRESS="$PROGRESS"
 done
@@ -281,7 +299,7 @@ if wait_unsealed 30; then
 fi
 
 FINAL_PROGRESS="$(curl -sf "${VAULT_ADDR}/v1/sys/seal-status" 2>/dev/null | jq -r '.progress // 0')"
-echo "ERROR: OpenBao is still sealed after applying ${UNSEAL_THRESHOLD} key(s)" >&2
+echo "ERROR: OpenBao is still sealed after trying ${KEYS_TRIED} unique key(s) from ${KEY_COUNT} stored slot(s)" >&2
 echo "       Final progress=${FINAL_PROGRESS}/${UNSEAL_THRESHOLD}." >&2
 if [ "$FINAL_PROGRESS" -lt "$UNSEAL_THRESHOLD" ] 2>/dev/null; then
   echo "       Progress < threshold means accepted keys did not count toward unseal:" >&2
