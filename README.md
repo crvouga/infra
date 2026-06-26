@@ -26,7 +26,7 @@ Project repos ──▶ ghcr.io (public images)
           │             │             │
           └─────────────┼─────────────┘
                         ▼
-         Railway (crvouga-infra / production)
+         Railway (infra / production)
                         │
                         ▼
               *.<zone> via Cloudflare DNS
@@ -39,10 +39,10 @@ Project repos ──▶ ghcr.io (public images)
 | `zone` | Primary DNS zone (e.g. `chrisvouga.dev`) |
 | `image_owner` | GHCR org/user |
 | `infra_github_repo` | GitHub repo slug for this infra repo |
-| `railway.project` | Railway project name (e.g. `crvouga-infra`) |
+| `railway.project` | Railway project name (e.g. `infra`) |
 | `railway.environment` | Environment name (default `production`) |
 | `railway.region` | Deployment region (default `us-east4`) |
-| `railway.service_prefix` | Service name prefix (`crvouga-{id}`) |
+| `railway.service_prefix` | Optional service name prefix (default: none — names match service `id`) |
 | `railway.sleep` | Per service: `true` (serverless) or `false` (always on) |
 
 Derived automatically: `image_prefix` (`chrisvouga`), Vault URL (`https://vault.<zone>`).
@@ -97,7 +97,7 @@ vault run -- bun run provision-railway --apply
 # or: export RAILWAY_TOKEN=... && bun run provision-railway --apply
 ```
 
-Creates project `crvouga-infra`, fleet services (excludes vault), custom domains, and volumes.
+Creates project `infra`, fleet services (excludes vault), custom domains, and volumes. After migrating from prefixed names, run `bun run rename-railway --apply` once.
 
 ### 4. Run Deploy Pipeline
 

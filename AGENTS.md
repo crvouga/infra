@@ -1,18 +1,19 @@
 # Agent Notes
 
-## Global resource naming (`crvouga-*`)
-
-Railway services, S3 buckets, and any other **globally unique** platform resource must use the `crvouga-` prefix.
+## Global resource naming
 
 | Resource | Pattern | Example |
 | -------- | ------- | ------- |
-| Railway service | `crvouga-<id>` | `crvouga-portfolio`, `crvouga-vault` |
+| Railway project | from `services.yaml` → `railway.project` | `infra` |
+| Railway service | service `id` (no prefix) | `portfolio`, `vault` |
 | GHCR image | `chrisvouga-<id>` | `ghcr.io/crvouga/chrisvouga-portfolio` |
 | S3 bucket (when owned by this stack) | `crvouga-<purpose>` or existing shared bucket keys in Vault | — |
 
-Derived from [`services.yaml`](services.yaml) → `railway.service_prefix` (currently `crvouga`) via `railwayServiceName()` in [`lib/services.ts`](lib/services.ts).
+Railway names come from [`services.yaml`](services.yaml) via `railwayServiceName()` in [`lib/services.ts`](lib/services.ts) — defaults to the service `id`. Legacy Fly.io apps used the `crvouga-` prefix; see `legacyFlyAppName()`.
 
 Public DNS hostnames stay on the zone (`portfolio.chrisvouga.dev`, etc.); Railway custom domains are provisioned via the GraphQL API and synced to Cloudflare.
+
+**Railway API quota:** run one Railway script at a time locally (`sync-dns`, `rename-railway`, `provision-railway`, etc.). Do not run ad-hoc `bun -e` polling loops — use `sync-dns --apply --wait-for-certs` when waiting for TLS. Set `RAILWAY_WAIT_ON_RATE_LIMIT=1` or pass `--wait-on-rate-limit` on maintenance scripts to sleep through 429 windows.
 
 ## Standalone vault (`vault/`)
 
@@ -20,7 +21,7 @@ Vault is **`standalone: true`** in [`services.yaml`](services.yaml) — excluded
 
 | Resource | Value |
 | -------- | ----- |
-| Railway service | `crvouga-vault` |
+| Railway service | `vault` |
 | Public hostname | `vault.chrisvouga.dev` |
 | GHCR image | `ghcr.io/crvouga/chrisvouga-vault` |
 | CI | **Vault deploy** (`.github/workflows/vault-deploy.yml`) on `vault/**` changes |
@@ -53,7 +54,7 @@ If `vault run` fails with `No value found at secret/personal/prd`, KV is empty �
 
 - Nested Bun monorepo; `cd turborepo && bun install` for local dev.
 - CI: **Turborepo check** on `turborepo/**`; **Publish turborepo image** on API changes.
-- Deploy: publish dispatches infra **Deploy Pipeline** for `crvouga-turborepo`.
+- Deploy: publish dispatches infra **Deploy Pipeline** for `turborepo`.
 - See [`turborepo/AGENTS.md`](turborepo/AGENTS.md) for secrets and client usage.
 
 ## Hard rules

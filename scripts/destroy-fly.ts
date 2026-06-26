@@ -9,8 +9,8 @@
 import { $ } from "bun";
 import {
   deployableServices,
+  legacyFlyAppName,
   loadServicesConfig,
-  railwayServiceName,
 } from "../lib/services.js";
 import { requireFlyApiToken } from "../lib/fly-token.js";
 
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   const config = loadServicesConfig();
   const apps = [
     ...new Set([
-      ...deployableServices(config).map((service) => railwayServiceName(config, service.id)),
+      ...deployableServices(config).map((service) => legacyFlyAppName(config, service.id)),
       ...ALWAYS_DESTROY_FLY_APPS,
     ]),
   ];

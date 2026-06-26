@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Destroy crvouga-vault on Railway (bootstrap creds only — no vault run).
+# Destroy vault on Railway (bootstrap creds only — no vault run).
 set -euo pipefail
 
 # shellcheck source=lib/railway-bootstrap.sh

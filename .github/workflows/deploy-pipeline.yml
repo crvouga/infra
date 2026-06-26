@@ -115,6 +115,9 @@ jobs:
           set -euo pipefail
           ARGS=()
           if [ "${CF_APPLY}" = "true" ]; then ARGS+=(--apply); fi
+          if [ "${CF_APPLY}" = "true" ] && { [ "${{ github.event_name }}" = "repository_dispatch" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; }; then
+            ARGS+=(--wait-for-certs)
+          fi
           bun run sync-dns "${ARGS[@]}"
       - name: Ensure apex redirect
         env:

@@ -110,11 +110,17 @@ export function railwayRegion(config: ServicesConfig): string {
 }
 
 export function railwayServicePrefix(config: ServicesConfig): string {
-  return config.railway?.service_prefix?.trim() || "crvouga";
+  return config.railway?.service_prefix?.trim() ?? "";
 }
 
 export function railwayServiceName(config: ServicesConfig, id: string): string {
-  return `${railwayServicePrefix(config)}-${id}`;
+  const prefix = railwayServicePrefix(config);
+  return prefix ? `${prefix}-${id}` : id;
+}
+
+/** Legacy Fly.io app names kept the `crvouga-` prefix after Railway dropped it. */
+export function legacyFlyAppName(_config: ServicesConfig, id: string): string {
+  return `crvouga-${id}`;
 }
 
 export function railwaySleep(service: ServiceSpec): boolean {
@@ -292,8 +298,8 @@ export function fleetServices(config: ServicesConfig): readonly ServiceSpec[] {
   return deployableServices(config);
 }
 
-/** @deprecated Use railwayServiceName */
-export const flyAppName = railwayServiceName;
+/** @deprecated Use legacyFlyAppName for Fly teardown; railwayServiceName for Railway. */
+export const flyAppName = legacyFlyAppName;
 /** @deprecated Use railwayProjectName */
 export const flyOrg = railwayProjectName;
 /** @deprecated Use railwayRegion */

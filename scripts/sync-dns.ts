@@ -3,10 +3,12 @@
  * Reconcile Cloudflare DNS for Railway custom domains.
  *
  * Per public hostname: CNAME + TXT from Railway customDomainCreate status.
+ * On --apply, retries Railway TLS issuance for domains stuck in ISSUE_FAILED.
  *
  * Usage:
  *   bun run scripts/sync-dns.ts
  *   bun run scripts/sync-dns.ts --apply
+ *   bun run scripts/sync-dns.ts --apply --wait-for-certs
  *   bun run scripts/sync-dns.ts --id portfolio --apply
  */
 import { CloudflareApi, cloudflareCredentialsFromEnv, type CloudflareDnsRecord } from "../lib/cloudflare-api.js";
@@ -14,8 +16,9 @@ import {
   ensureCustomDomain,
   findServiceByName,
   getCustomDomain,
+  isCustomDomainCertificateFailed,
   isCustomDomainCertificateReady,
-  listCustomDomains,
+  issueCustomDomainCertificate,
   railwayDnsRecords,
   resolveEnvironment,
   resolveProjectContext,
@@ -164,10 +167,6 @@ async function resolveDomainsForServices(
 
   for (const service of services) {
     domains.set(service.id, await resolveDomainForService(config, service, ctx));
-    // Railway throttles bursty GraphQL; pace lookups during fleet sync.
-    if (services.length > 1) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
   }
 
   return domains;
@@ -392,43 +391,87 @@ async function applyAction(
   }
 }
 
+async function retryFailedCertificates(
+  config: ServicesConfig,
+  services: readonly DnsTarget[],
+  domainsByServiceId: ReadonlyMap<string, RailwayCustomDomain>,
+  apply: boolean,
+): Promise<void> {
+  const ctx = await loadRailwayDnsContext(config);
+
+  for (const service of services) {
+    const domain = domainsByServiceId.get(service.id);
+    if (!domain) continue;
+
+    let status = domain.status.certificateStatus?.toUpperCase() ?? "PENDING";
+    if (isCustomDomainCertificateReady(status)) {
+      console.log(`  OK     ${service.hostname} certificate ${status}`);
+      continue;
+    }
+    if (!isCustomDomainCertificateFailed(status)) {
+      console.log(`  ${service.hostname}: certificate ${status} (not retrying yet)`);
+      continue;
+    }
+
+    const line = `RETRY  ${service.hostname} certificate ${status} → issue`;
+    if (!apply) {
+      console.log(`  [plan] ${line}`);
+      continue;
+    }
+
+    await issueCustomDomainCertificate(domain.id);
+    const fresh = await getCustomDomain(domain.id, ctx.projectId);
+    status = fresh.status.certificateStatus?.toUpperCase() ?? "PENDING";
+    console.log(`  [done] ${line} (now ${status})`);
+  }
+}
+
+function certificatePollIntervalMs(serviceCount: number): number {
+  return serviceCount > 5 ? 60_000 : 30_000;
+}
+
 async function waitForCertificates(
   config: ServicesConfig,
   services: readonly DnsTarget[],
+  domainsByServiceId: ReadonlyMap<string, RailwayCustomDomain>,
   timeoutMs = 900_000,
 ): Promise<void> {
+  const ctx = await loadRailwayDnsContext(config);
   const deadline = Date.now() + timeoutMs;
-  const projectName = railwayProjectName(config);
-  const environmentName = railwayEnvironmentName(config);
-  const ctx = await resolveProjectContext(projectName, environmentName);
-  const environment = resolveEnvironment(ctx.project, environmentName);
+  const pollIntervalMs = certificatePollIntervalMs(services.length);
 
-  while (Date.now() < deadline) {
-    let pending = 0;
-    for (const service of services) {
-      const railwayService = findServiceByName(ctx.project, railwayServiceName(config, service.id));
-      if (!railwayService) continue;
-      const domains = await listCustomDomains({
-        projectId: ctx.projectId,
-        environmentId: environment.id,
-        serviceId: railwayService.id,
-      });
-      const domain = domains.find((d) => d.domain === service.hostname);
-      if (!domain) continue;
-      const fresh = await getCustomDomain(domain.id, ctx.projectId);
+  const pending = new Map<string, { readonly hostname: string; readonly domainId: string }>();
+  for (const service of services) {
+    const domain = domainsByServiceId.get(service.id);
+    if (!domain) continue;
+    pending.set(service.id, { hostname: service.hostname, domainId: domain.id });
+  }
+
+  while (Date.now() < deadline && pending.size > 0) {
+    for (const [serviceId, target] of [...pending.entries()]) {
+      const fresh = await getCustomDomain(target.domainId, ctx.projectId);
       const status = fresh.status.certificateStatus?.toUpperCase() ?? "PENDING";
-      if (!isCustomDomainCertificateReady(status)) {
-        pending += 1;
-        console.log(`  ${service.hostname}: certificate ${status}`);
+      if (isCustomDomainCertificateReady(status)) {
+        pending.delete(serviceId);
+        console.log(`  OK     ${target.hostname} certificate ${status}`);
+        continue;
       }
+      console.log(`  ${target.hostname}: certificate ${status}`);
     }
-    if (pending === 0) {
+
+    if (pending.size === 0) {
       console.log("  All custom domain certificates issued");
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 15_000));
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
-  throw new Error("Timed out waiting for Railway custom domain certificates");
+
+  if (pending.size > 0) {
+    throw new Error(
+      `Timed out waiting for Railway custom domain certificates (${pending.size} pending)`,
+    );
+  }
 }
 
 async function main(): Promise<void> {
@@ -485,8 +528,11 @@ async function main(): Promise<void> {
   console.log(`\nSummary: changes=${changes}, errors=${errors}`);
   if (errors > 0) process.exit(1);
 
+  console.log("\nRailway TLS certificates:");
+  await retryFailedCertificates(config, services, domainsByServiceId, args.apply);
+
   if (args.apply && args.waitForCerts) {
-    await waitForCertificates(config, services);
+    await waitForCertificates(config, services, domainsByServiceId);
   }
 }
 

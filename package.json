@@ -11,6 +11,7 @@
     "sync-railway-secrets": "bun run scripts/sync-railway-secrets.ts",
     "health-check": "bun run scripts/health-check-urls.ts",
     "provision-railway": "bun run scripts/provision-railway.ts",
+    "rename-railway": "bun run scripts/rename-railway.ts",
     "deploy-railway": "bun run scripts/deploy-railway.ts",
     "make-ghcr-public": "bun run scripts/make-ghcr-public.ts",
     "seed-vault-github-secret": "bun run scripts/seed-vault-github-secret.ts",

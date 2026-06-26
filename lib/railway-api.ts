@@ -17,6 +17,20 @@ export class RailwayApiError extends Error {
   }
 }
 
+export class RailwayRateLimitError extends RailwayApiError {
+  readonly retryAfterMs: number;
+
+  constructor(message: string, retryAfterMs: number, errors: readonly RailwayGraphQLError[] = []) {
+    super(message, errors);
+    this.name = "RailwayRateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export function isRailwayRateLimitError(err: unknown): err is RailwayRateLimitError {
+  return err instanceof RailwayRateLimitError;
+}
+
 type GraphQLResponse<T> = {
   readonly data?: T;
   readonly errors?: readonly RailwayGraphQLError[];
@@ -61,6 +75,76 @@ export type RailwayProjectContext = {
   readonly environmentId: string;
 };
 
+type ProjectSummary = { readonly id: string; readonly name: string };
+
+type CachedProjectContext = RailwayProjectContext & { readonly project: RailwayProject };
+
+let listProjectsCache: readonly ProjectSummary[] | null = null;
+const projectCache = new Map<string, RailwayProject>();
+const projectContextCache = new Map<string, CachedProjectContext>();
+
+let requestChain: Promise<void> = Promise.resolve();
+let lastRequestAt = 0;
+
+function railwayMinIntervalMs(): number {
+  const raw = process.env["RAILWAY_API_MIN_INTERVAL_MS"]?.trim();
+  const parsed = raw ? Number(raw) : 400;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 400;
+}
+
+/** Clear process-local Railway read caches (called after mutations). */
+export function invalidateRailwayCache(): void {
+  listProjectsCache = null;
+  projectCache.clear();
+  projectContextCache.clear();
+}
+
+async function paceRailwayRequest(): Promise<void> {
+  requestChain = requestChain.then(async () => {
+    const wait = Math.max(0, lastRequestAt + railwayMinIntervalMs() - Date.now());
+    if (wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    lastRequestAt = Date.now();
+  });
+  await requestChain;
+}
+
+export async function waitForRailwayRateLimit(
+  error: RailwayRateLimitError,
+  options?: { readonly logEveryMs?: number },
+): Promise<void> {
+  const logEveryMs = options?.logEveryMs ?? 30_000;
+  let remaining = error.retryAfterMs;
+  while (remaining > 0) {
+    console.log(`  Waiting ${Math.ceil(remaining / 1000)}s for Railway rate limit…`);
+    const step = Math.min(remaining, logEveryMs);
+    await new Promise((resolve) => setTimeout(resolve, step));
+    remaining -= step;
+  }
+}
+
+function throwRailwayHttpError(
+  status: number,
+  detail: string,
+  response: Response,
+  body: string,
+  errors: readonly RailwayGraphQLError[] = [],
+): never {
+  if (status === 429) {
+    const retryAfterMs = parseRetryAfterMs(response, body) ?? 60_000;
+    throw new RailwayRateLimitError(
+      `Railway API HTTP 429: ${detail}${formatRetryAfter(response, body)}`,
+      retryAfterMs,
+      errors,
+    );
+  }
+  throw new RailwayApiError(
+    `Railway API HTTP ${status}: ${detail}${formatRetryAfter(response, body)}`,
+    errors,
+  );
+}
+
 function parseRetryAfterMs(response: Response, body: string): number | undefined {
   const header = response.headers.get("retry-after")?.trim();
   if (header) {
@@ -83,6 +167,18 @@ function railwayRetryDelayMs(response: Response, body: string, attempt: number):
   return Math.min(1_000 * 2 ** attempt, 30_000);
 }
 
+function formatRetryAfter(response: Response, body: string): string {
+  const retryAfterMs = parseRetryAfterMs(response, body);
+  if (retryAfterMs == null) return "";
+  const seconds = Math.ceil(retryAfterMs / 1000);
+  return ` Retry after ${seconds}s.`;
+}
+
+function shouldRetryRailwayRequest(status: number): boolean {
+  // 429 is a quota window — retrying in-process just blocks the CLI for minutes.
+  return status === 503;
+}
+
 async function railwayRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
@@ -91,6 +187,8 @@ async function railwayRequest<T>(
   const maxAttempts = 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await paceRailwayRequest();
+
     const response = await fetch(RAILWAY_GRAPHQL_URL, {
       method: "POST",
       headers: {
@@ -105,17 +203,17 @@ async function railwayRequest<T>(
     try {
       payload = JSON.parse(body) as GraphQLResponse<T>;
     } catch {
-      if ((response.status === 429 || response.status === 503) && attempt < maxAttempts - 1) {
+      if (shouldRetryRailwayRequest(response.status) && attempt < maxAttempts - 1) {
         await new Promise((resolve) =>
           setTimeout(resolve, railwayRetryDelayMs(response, body, attempt)),
         );
         continue;
       }
-      throw new RailwayApiError(`Railway API HTTP ${response.status}: ${body.slice(0, 500)}`);
+      throwRailwayHttpError(response.status, body.slice(0, 500), response, body);
     }
 
     if (!response.ok) {
-      if ((response.status === 429 || response.status === 503) && attempt < maxAttempts - 1) {
+      if (shouldRetryRailwayRequest(response.status) && attempt < maxAttempts - 1) {
         await new Promise((resolve) =>
           setTimeout(resolve, railwayRetryDelayMs(response, body, attempt)),
         );
@@ -124,7 +222,7 @@ async function railwayRequest<T>(
       const detail =
         payload.errors?.map((e) => e.message).join("; ") ||
         body.slice(0, 500);
-      throw new RailwayApiError(`Railway API HTTP ${response.status}: ${detail}`, payload.errors ?? []);
+      throwRailwayHttpError(response.status, detail, response, body, payload.errors ?? []);
     }
 
     if (payload.errors?.length) {
@@ -146,9 +244,11 @@ function nodes<T>(connection: Connection<T> | null | undefined): readonly T[] {
   return connection?.edges?.map((edge) => edge.node) ?? [];
 }
 
-export async function listProjects(): Promise<readonly { readonly id: string; readonly name: string }[]> {
+export async function listProjects(): Promise<readonly ProjectSummary[]> {
+  if (listProjectsCache) return listProjectsCache;
+
   const data = await railwayRequest<{
-    projects: Connection<{ readonly id: string; readonly name: string }>;
+    projects: Connection<ProjectSummary>;
   }>(`
     query projects {
       projects {
@@ -161,10 +261,14 @@ export async function listProjects(): Promise<readonly { readonly id: string; re
       }
     }
   `);
-  return nodes(data.projects);
+  listProjectsCache = nodes(data.projects);
+  return listProjectsCache;
 }
 
 export async function getProject(projectId: string): Promise<RailwayProject> {
+  const cached = projectCache.get(projectId);
+  if (cached) return cached;
+
   const data = await railwayRequest<{ project: RailwayProject }>(
     `
     query project($id: String!) {
@@ -192,6 +296,7 @@ export async function getProject(projectId: string): Promise<RailwayProject> {
   `,
     { id: projectId },
   );
+  projectCache.set(projectId, data.project);
   return data.project;
 }
 
@@ -213,6 +318,7 @@ export async function createProject(name: string): Promise<RailwayProject> {
   `,
     { input: { name } },
   );
+  invalidateRailwayCache();
   return getProject(data.projectCreate.id);
 }
 
@@ -220,6 +326,36 @@ export async function ensureProject(name: string): Promise<RailwayProject> {
   const existing = await findProjectByName(name);
   if (existing) return existing;
   return createProject(name);
+}
+
+export async function updateProjectName(projectId: string, name: string): Promise<void> {
+  await railwayRequest<{ projectUpdate: { readonly id: string; readonly name: string } }>(
+    `
+    mutation projectUpdate($id: String!, $input: ProjectUpdateInput!) {
+      projectUpdate(id: $id, input: $input) {
+        id
+        name
+      }
+    }
+  `,
+    { id: projectId, input: { name } },
+  );
+  invalidateRailwayCache();
+}
+
+export async function updateServiceName(serviceId: string, name: string): Promise<void> {
+  await railwayRequest<{ serviceUpdate: { readonly id: string; readonly name: string } }>(
+    `
+    mutation serviceUpdate($id: String!, $input: ServiceUpdateInput!) {
+      serviceUpdate(id: $id, input: $input) {
+        id
+        name
+      }
+    }
+  `,
+    { id: serviceId, input: { name } },
+  );
+  invalidateRailwayCache();
 }
 
 export function resolveEnvironment(
@@ -269,6 +405,7 @@ export async function createServiceFromImage(input: {
       },
     },
   );
+  invalidateRailwayCache();
   return data.serviceCreate;
 }
 
@@ -492,6 +629,22 @@ export async function ensureCustomDomain(input: {
   return createCustomDomain(input);
 }
 
+export async function issueCustomDomainCertificate(customDomainId: string): Promise<void> {
+  await railwayRequest<{ customDomainIssueCertificate: boolean }>(
+    `
+    mutation customDomainIssueCertificate($id: String!) {
+      customDomainIssueCertificate(id: $id)
+    }
+  `,
+    { id: customDomainId },
+  );
+}
+
+export function isCustomDomainCertificateFailed(status: string | null | undefined): boolean {
+  const normalized = status?.toUpperCase() ?? "";
+  return normalized.includes("FAILED") || normalized.includes("ERROR");
+}
+
 export function isCustomDomainCertificateReady(status: string | null | undefined): boolean {
   const normalized = status?.toUpperCase() ?? "";
   return normalized === "CERTIFICATE_STATUS_TYPE_VALID" || normalized === "ISSUED";
@@ -642,14 +795,20 @@ export async function ensureVolume(input: {
 export async function resolveProjectContext(
   projectName: string,
   environmentName: string,
-): Promise<RailwayProjectContext & { readonly project: RailwayProject }> {
+): Promise<CachedProjectContext> {
+  const cacheKey = `${projectName}:${environmentName}`;
+  const cached = projectContextCache.get(cacheKey);
+  if (cached) return cached;
+
   const project = await ensureProject(projectName);
   const environment = resolveEnvironment(project, environmentName);
-  return {
+  const ctx: CachedProjectContext = {
     project,
     projectId: project.id,
     environmentId: environment.id,
   };
+  projectContextCache.set(cacheKey, ctx);
+  return ctx;
 }
 
 export async function waitForDeployment(
@@ -762,6 +921,7 @@ export async function deleteService(serviceId: string): Promise<void> {
   `,
     { id: serviceId },
   );
+  invalidateRailwayCache();
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
@@ -773,4 +933,5 @@ export async function deleteProject(projectId: string): Promise<void> {
   `,
     { id: projectId },
   );
+  invalidateRailwayCache();
 }

@@ -11,10 +11,9 @@ skip_rollout_repos:
   - crvouga/infra
 
 railway:
-  project: crvouga-infra
+  project: infra
   environment: production
   region: us-east4
-  service_prefix: crvouga
 
 services:
   - id: portfolio

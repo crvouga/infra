@@ -1,7 +1,5 @@
 import {
-  ensureProject,
   findServiceByName,
-  resolveEnvironment,
   resolveProjectContext,
   upsertVariables,
 } from "./railway-api.js";
@@ -71,6 +69,10 @@ export function collectServiceVariables(
   vaultData: Record<string, string> = {},
 ): { readonly variables: Record<string, string>; readonly missing: readonly string[] } {
   const variables: Record<string, string> = { ...(service.env ?? {}) };
+  // Railway injects PORT when unset; custom domains use services.yaml `port` as targetPort.
+  if (service.port != null) {
+    variables.PORT = String(service.port);
+  }
   const missing: string[] = [];
 
   for (const spec of service.secrets ?? []) {
@@ -116,16 +118,14 @@ export async function syncServiceVariablesToRailway(
   const serviceName = railwayServiceName(config, service.id);
 
   const ctx = await resolveProjectContext(projectName, environmentName);
-  const project = await ensureProject(projectName);
-  const environment = resolveEnvironment(project, environmentName);
-  const railwayService = findServiceByName(project, serviceName);
+  const railwayService = findServiceByName(ctx.project, serviceName);
   if (!railwayService) {
     throw new Error(`Railway service "${serviceName}" not found — run provision-railway --apply first`);
   }
 
   await upsertVariables({
     projectId: ctx.projectId,
-    environmentId: environment.id,
+    environmentId: ctx.environmentId,
     serviceId: railwayService.id,
     variables,
     skipDeploys: options?.skipDeploys ?? true,
