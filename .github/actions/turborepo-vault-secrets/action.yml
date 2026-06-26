@@ -11,6 +11,32 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Wait for Vault to be unsealed
+      shell: bash
+      run: |
+        set -euo pipefail
+        addr="https://vault.chrisvouga.dev"
+        echo "Waiting for Vault at ${addr}..."
+        for i in $(seq 1 90); do
+          code="$(curl -s -o /dev/null -w '%{http_code}' \
+            "${addr}/v1/sys/health?standbyok=true&perfstandbyok=true" || true)"
+          case "$code" in
+            200|429|472|473)
+              echo "Vault is unsealed (HTTP ${code})"
+              exit 0
+              ;;
+            503)
+              echo "Vault sealed — retry ${i}/90..."
+              ;;
+            *)
+              echo "Vault not ready (HTTP ${code:-000}) — retry ${i}/90..."
+              ;;
+          esac
+          sleep 5
+        done
+        echo "::error::Vault at ${addr} did not become unsealed within 7.5 minutes"
+        exit 1
+
     - id: vault_core
       continue-on-error: true
       uses: hashicorp/vault-action@v4
