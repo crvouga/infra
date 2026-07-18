@@ -13,7 +13,7 @@ runs:
         set -euo pipefail
         addr="${{ inputs.vault_addr }}"
         echo "Waiting for Vault at ${addr}..."
-        for i in $(seq 1 90); do
+        for i in $(seq 1 180); do
           code="$(curl -s -o /dev/null -w '%{http_code}' \
             "${addr}/v1/sys/health?standbyok=true&perfstandbyok=true" || true)"
           case "$code" in
@@ -22,15 +22,15 @@ runs:
               exit 0
               ;;
             503)
-              echo "Vault sealed — retry ${i}/90..."
+              echo "Vault sealed — retry ${i}/180..."
               ;;
             *)
-              echo "Vault not ready (HTTP ${code:-000}) — retry ${i}/90..."
+              echo "Vault not ready (HTTP ${code:-000}) — retry ${i}/180..."
               ;;
           esac
           sleep 5
         done
-        echo "::error::Vault at ${addr} did not become unsealed within 7.5 minutes"
+        echo "::error::Vault at ${addr} did not become unsealed within 15 minutes"
         exit 1
 
     - id: vault_core

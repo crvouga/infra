@@ -36,12 +36,20 @@ pick_asset_url() {
   ' | head -n 1
 }
 
-DOWNLOAD_URL="$(pick_asset_url "bao_${VERSION}_Linux_x86_64.tar.gz")"
-if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-  DOWNLOAD_URL="$(pick_asset_url "bao_${VERSION}_linux_amd64.tar.gz")"
-fi
+DOWNLOAD_URL=""
+for CANDIDATE in \
+  "bao_${VERSION}_Linux_x86_64.tar.gz" \
+  "bao_${VERSION}_linux_amd64.tar.gz" \
+  "openbao_${VERSION}_linux_amd64.tar.gz"
+do
+  DOWNLOAD_URL="$(pick_asset_url "$CANDIDATE")"
+  if [ -n "$DOWNLOAD_URL" ] && [ "$DOWNLOAD_URL" != "null" ]; then
+    break
+  fi
+  DOWNLOAD_URL=""
+done
 
-if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+if [ -z "$DOWNLOAD_URL" ]; then
   echo "ERROR: No Linux x86_64 tarball found in OpenBao ${TAG} release." >&2
   echo "Available assets:" >&2
   echo "$RELEASE_JSON" | jq -r '.assets[].name' >&2
@@ -55,16 +63,27 @@ trap 'rm -rf "$TMPDIR"' EXIT
 curl -fsSL "$DOWNLOAD_URL" -o "${TMPDIR}/openbao.tar.gz"
 tar -xzf "${TMPDIR}/openbao.tar.gz" -C "$TMPDIR"
 
-if [ ! -f "${TMPDIR}/bao" ]; then
-  echo "ERROR: bao binary not found in tarball" >&2
+BINARY=""
+for CANDIDATE in "${TMPDIR}/bao" "${TMPDIR}/openbao"; do
+  if [ -f "$CANDIDATE" ]; then
+    BINARY="$CANDIDATE"
+    break
+  fi
+done
+if [ -z "$BINARY" ]; then
+  # Some archives nest the binary one level down.
+  BINARY="$(find "$TMPDIR" -maxdepth 2 -type f \( -name bao -o -name openbao \) | head -n 1)"
+fi
+if [ -z "$BINARY" ] || [ ! -f "$BINARY" ]; then
+  echo "ERROR: bao/openbao binary not found in tarball" >&2
   exit 1
 fi
 
 INSTALL_DIR="$(dirname "$VAULT_INSTALL_PATH")"
 if [ -w "$INSTALL_DIR" ]; then
-  install -m 755 "${TMPDIR}/bao" "$VAULT_INSTALL_PATH"
+  install -m 755 "$BINARY" "$VAULT_INSTALL_PATH"
 else
-  sudo install -m 755 "${TMPDIR}/bao" "$VAULT_INSTALL_PATH"
+  sudo install -m 755 "$BINARY" "$VAULT_INSTALL_PATH"
 fi
 
 if VERSION_OUTPUT="$("$VAULT_INSTALL_PATH" version 2>/dev/null)"; then

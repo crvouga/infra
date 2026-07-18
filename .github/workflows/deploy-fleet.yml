@@ -2,8 +2,8 @@ name: Deploy fleet
 
 # Railway stack — fully automated via GitHub Actions.
 #
-#   prepare → dns-sync | make-ghcr-public | railway-deploy (matrix)
-#         → health-check-all
+#   prepare | vault-ready → dns-sync | make-ghcr-public | railway-deploy (matrix)
+#                         → health-check-all
 #
 # Secrets: Vault OIDC via .github/actions/vault-secrets (not GitHub repo secrets).
 #
@@ -11,6 +11,7 @@ name: Deploy fleet
 #   - push to main (checks, DNS, GHCR — no fleet redeploy)
 #   - repository_dispatch (deploy-service)
 #   - workflow_dispatch
+#   - workflow_run after Deploy vault succeeds (reconcile DNS/GHCR once vault is unsealed)
 
 on:
   push:
@@ -41,9 +42,13 @@ on:
         required: false
         type: boolean
         default: true
+  workflow_run:
+    workflows: ["Deploy vault"]
+    types: [completed]
+    branches: [main]
 
 concurrency:
-  group: deploy-fleet-${{ github.ref }}
+  group: deploy-fleet-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -54,6 +59,7 @@ permissions:
 env:
   SERVICE_ID: ${{ github.event.client_payload.id || inputs.service_id || '' }}
   IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'latest' }}
+  VAULT_ADDR: https://vault.chrisvouga.dev
 
 jobs:
   prepare:
@@ -83,9 +89,48 @@ jobs:
           echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Deploy: service_id='${SID:-all}' services=${SERVICE_IDS} image_tag='${TAG}'"
 
+  vault-ready:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful Deploy vault for workflow_run
+        if: github.event_name == 'workflow_run'
+        run: |
+          set -euo pipefail
+          conclusion="${{ github.event.workflow_run.conclusion }}"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::Skipping Deploy fleet: Deploy vault concluded with '${conclusion}' (need success + unseal)"
+            exit 1
+          fi
+          echo "Deploy vault succeeded — waiting for Vault to be ready"
+
+      - name: Wait for Vault to be unsealed
+        run: |
+          set -euo pipefail
+          addr="${VAULT_ADDR}"
+          echo "Waiting for Vault at ${addr}..."
+          for i in $(seq 1 180); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' \
+              "${addr}/v1/sys/health?standbyok=true&perfstandbyok=true" || true)"
+            case "$code" in
+              200|429|472|473)
+                echo "Vault is unsealed (HTTP ${code})"
+                exit 0
+                ;;
+              503)
+                echo "Vault sealed — retry ${i}/180..."
+                ;;
+              *)
+                echo "Vault not ready (HTTP ${code:-000}) — retry ${i}/180..."
+                ;;
+            esac
+            sleep 5
+          done
+          echo "::error::Vault at ${addr} did not become unsealed within 15 minutes"
+          exit 1
+
   make-ghcr-public:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [prepare, vault-ready]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -100,7 +145,7 @@ jobs:
 
   dns-sync:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [prepare, vault-ready]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -112,7 +157,7 @@ jobs:
       - name: Reconcile DNS
         env:
           RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
-          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+          CF_APPLY: ${{ github.event_name == 'push' || github.event_name == 'workflow_run' || inputs.apply_dns != false }}
         run: |
           set -euo pipefail
           ARGS=()
@@ -123,7 +168,7 @@ jobs:
           bun run sync-dns "${ARGS[@]}"
       - name: Ensure apex redirect
         env:
-          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+          CF_APPLY: ${{ github.event_name == 'push' || github.event_name == 'workflow_run' || inputs.apply_dns != false }}
         run: |
           set -euo pipefail
           ARGS=()
@@ -131,7 +176,7 @@ jobs:
           bun run sync-redirects "${ARGS[@]}"
       - name: Ensure domain aliases
         env:
-          CF_APPLY: ${{ github.event_name == 'push' || inputs.apply_dns != false }}
+          CF_APPLY: ${{ github.event_name == 'push' || github.event_name == 'workflow_run' || inputs.apply_dns != false }}
         run: |
           set -euo pipefail
           ARGS=()
@@ -141,7 +186,7 @@ jobs:
   railway-deploy:
     if: github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [prepare, vault-ready]
     strategy:
       fail-fast: false
       matrix:
@@ -184,8 +229,8 @@ jobs:
 
   health-check-all:
     runs-on: ubuntu-latest
-    needs: [prepare, railway-deploy]
-    if: always() && needs.prepare.result == 'success' && (needs.railway-deploy.result == 'success' || needs.railway-deploy.result == 'skipped')
+    needs: [prepare, vault-ready, railway-deploy]
+    if: always() && needs.prepare.result == 'success' && needs.vault-ready.result == 'success' && (needs.railway-deploy.result == 'success' || needs.railway-deploy.result == 'skipped')
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
