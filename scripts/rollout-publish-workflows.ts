@@ -63,7 +63,7 @@ function renderPublishWorkflow(
     .map((s) => {
       const name = jobName(s);
       return `  ${name}:
-    uses: ${infraRepo}/.github/workflows/reusable-publish-image.yml@main
+    uses: ${infraRepo}/.github/workflows/publish-image.yml@main
     secrets:
       DEPLOY_DISPATCH_TOKEN: \${{ secrets.DEPLOY_DISPATCH_TOKEN }}
       CALLER_GITHUB_TOKEN: \${{ github.token }}

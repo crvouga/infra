@@ -1,4 +1,4 @@
-name: Vault deploy
+name: Deploy vault
 
 # Full pipeline on push to main: migrate -> build -> Railway deploy -> DNS -> unseal -> smoke -> health.
 # workflow_dispatch with unseal_only skips migrate/build/deploy; still reconciles DNS and verifies the domain.
@@ -17,7 +17,7 @@ on:
         default: false
 
 concurrency:
-  group: vault-deploy-${{ github.ref }}
+  group: deploy-vault-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:

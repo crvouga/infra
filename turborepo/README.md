@@ -41,7 +41,7 @@ bun run check:vault-secrets:prd    # prd (deploy uses this)
 bun run deploy
 ```
 
-Production deploys run via **Publish image** → infra deploy-pipeline on push to `main`.
+Production deploys run via **CI turborepo** (publish job) → **Deploy fleet** on push to `main`.
 
 ## Turbo client config
 

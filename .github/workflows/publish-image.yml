@@ -1,13 +1,13 @@
-# Reusable workflow — call from each project repo to build, push, and notify deploy.
+# Shared workflow — call from each project repo (or ci-turborepo) to build, push, and notify deploy.
 #
-# Example caller (.github/workflows/publish-image.yml):
+# Example caller (.github/workflows/publish.yml):
 #
 #   on:
 #     push:
 #       branches: [main]
 #   jobs:
 #     publish:
-#       uses: crvouga/infra/.github/workflows/reusable-publish-image.yml@main
+#       uses: crvouga/infra/.github/workflows/publish-image.yml@main
 #       permissions:
 #         contents: read
 #         packages: write
@@ -20,7 +20,7 @@
 #         image_prefix: chrisvouga
 #         infra_github_repo: crvouga/infra
 
-name: Reusable publish image
+name: Publish image
 
 on:
   workflow_call:

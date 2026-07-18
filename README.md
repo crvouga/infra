@@ -10,7 +10,7 @@ Platform paths, service names, and GHCR prefixes are derived from `services.yaml
 
 **Scale to zero (default):** most services use Railway serverless sleep (`railway.sleep: true`).
 
-**Always on:** `vault` only (`railway.sleep: false`). Vault is **standalone** — not deployed by the fleet Deploy Pipeline.
+**Always on:** `vault` only (`railway.sleep: false`). Vault is **standalone** — not deployed by the fleet **Deploy fleet** workflow.
 
 ## Architecture
 
@@ -67,7 +67,7 @@ export CLOUDFLARE_API_TOKEN='...'   # Zone:DNS:Edit for chrisvouga.dev
 ./scripts/seed-github-secrets.sh    # CF_API_TOKEN, DB_CONNECTION_URI, RAILWAY_TOKEN
 ```
 
-Run **Vault deploy** (push `vault/**` to `main`, or Actions → Vault deploy). The workflow uses `vault/scripts/railway-*.sh` — no Vault OIDC / KV required.
+Run **Deploy vault** (push `vault/**` to `main`, or Actions → Deploy vault). The workflow uses `vault/scripts/railway-*.sh` — no Vault OIDC / KV required.
 
 After first deploy: `./scripts/init.sh`, store unseal keys in `crvouga.kv`.
 
@@ -99,9 +99,9 @@ vault run -- bun run provision-railway --apply
 
 Creates project `infra`, fleet services (excludes vault), custom domains, and volumes. After migrating from prefixed names, run `bun run rename-railway --apply` once.
 
-### 4. Run Deploy Pipeline
+### 4. Run Deploy fleet
 
-Actions → **Deploy Pipeline** → Run workflow (or push to `main`). Matrix excludes standalone vault.
+Actions → **Deploy fleet** → Run workflow (or push to `main`). Matrix excludes standalone vault.
 
 ### 5. DNS cutover
 
@@ -112,7 +112,7 @@ vault run -- bun run sync-dns --apply --wait-for-certs
 bun run health-check --all-public
 ```
 
-Fleet DNS sync does not manage `vault.<zone>` — that record is owned by vault-deploy / `cd vault && make sync-dns`.
+Fleet DNS sync does not manage `vault.<zone>` — that record is owned by deploy-vault / `cd vault && make sync-dns`.
 
 ### 6. Fly teardown (post-cutover)
 
@@ -129,7 +129,7 @@ Sibling repos dispatch `deploy-service` with `{ id, image_tag }` after publishin
 Manual single-service deploy:
 
 ```bash
-gh workflow run deploy-pipeline.yml -f service_id=portfolio -f image_tag=abc123
+gh workflow run deploy-fleet.yml -f service_id=portfolio -f image_tag=abc123
 ```
 
 ## Local scripts
@@ -162,9 +162,11 @@ scripts/
   sync-dns.ts              # Cloudflare ← Railway custom domain records
   destroy-fly.ts           # post-cutover Fly teardown
   destroy-railway.ts       # remove Railway services by id
-vault/                     # OpenBao (vault-deploy workflow)
+vault/                     # OpenBao (deploy-vault workflow)
 turborepo/                 # Turborepo remote cache
 .github/workflows/
-  deploy-pipeline.yml
-  vault-deploy.yml
+  deploy-fleet.yml
+  deploy-vault.yml
+  ci-turborepo.yml
+  publish-image.yml
 ```

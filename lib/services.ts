@@ -49,7 +49,7 @@ export type ServiceSpec = {
   readonly hostname?: string;
   /** No DNS or public URL — queue consumers, etc. */
   readonly internal?: boolean;
-  /** Excluded from fleet deploy, DNS sync, and destroy-fly — managed by vault-deploy. */
+  /** Excluded from fleet deploy, DNS sync, and destroy-fly — managed by deploy-vault. */
   readonly standalone?: boolean;
   readonly railway?: RailwayServiceConfig;
   readonly github_repo: string;

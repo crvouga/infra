@@ -49,7 +49,17 @@ function ghcrVisibilityUrls(owner: string, packageName: string, repoSlug?: strin
   return urls;
 }
 
-async function isGhcrPubliclyPullable(owner: string, packageName: string): Promise<boolean> {
+const GHCR_MANIFEST_ACCEPT =
+  "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json";
+
+const GHCR_PUBLIC_PULL_ATTEMPTS = 3;
+const GHCR_PUBLIC_PULL_RETRY_MS = 1500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function isGhcrPubliclyPullableOnce(owner: string, packageName: string): Promise<boolean> {
   const tokenUrl =
     `https://ghcr.io/token?service=ghcr.io&scope=repository:${owner}/${packageName}:pull`;
   const tokenRes = await fetch(tokenUrl);
@@ -61,11 +71,20 @@ async function isGhcrPubliclyPullable(owner: string, packageName: string): Promi
 
   const manifestRes = await fetch(`https://ghcr.io/v2/${owner}/${packageName}/manifests/latest`, {
     headers: {
-      Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+      Accept: GHCR_MANIFEST_ACCEPT,
       Authorization: `Bearer ${token}`,
     },
   });
   return manifestRes.ok;
+}
+
+/** True when an anonymous pull token can fetch :latest (package is public). Retries briefly for post-push lag. */
+async function isGhcrPubliclyPullable(owner: string, packageName: string): Promise<boolean> {
+  for (let attempt = 1; attempt <= GHCR_PUBLIC_PULL_ATTEMPTS; attempt++) {
+    if (await isGhcrPubliclyPullableOnce(owner, packageName)) return true;
+    if (attempt < GHCR_PUBLIC_PULL_ATTEMPTS) await sleep(GHCR_PUBLIC_PULL_RETRY_MS);
+  }
+  return false;
 }
 
 export async function setGhcrPackagePublic(

@@ -9,7 +9,7 @@
 
 Self-hosted Turborepo Remote Cache on the chrisvouga.dev origin stack (Docker + Bun). Artifacts live in Backblaze B2 via `@pkgs/object-store` (`createS3ObjectStore` → `ObjectStoreImplS3`). Physical object keys are always `turbo-cache/prd/<artifact-hash>` in the shared bucket. Runtime secrets load from Vault at boot.
 
-CI publishes a **public** image to **GHCR** (`ghcr.io/crvouga/chrisvouga-turborepo:<sha>`); infra deploy-pipeline pulls and runs it. If the package is new, set GHCR visibility to public once in GitHub package settings.
+CI publishes a **public** image to **GHCR** (`ghcr.io/crvouga/chrisvouga-turborepo:<sha>`); infra **Deploy fleet** pulls and runs it. If the package is new, set GHCR visibility to public once in GitHub package settings.
 
 ## Vault secrets (source of truth)
 
@@ -31,12 +31,11 @@ Required keys (manual): `TURBO_TOKEN`, `VAULT_TOKEN`, B2 `B2_*`.
 | `bun run setup`                   | `apps/api/.env` + ensure Vault defaults in dev/prd |
 | `bun run check:vault-secrets`     | Verify dev config (CI gate)                        |
 | `bun run check:vault-secrets:prd` | Verify prd config (deploy gate)                    |
-| `bun run deploy`                  | Points to infra publish-turborepo workflow         |
+| `bun run deploy`                  | Points to infra ci-turborepo workflow              |
 
 ## CI/CD
 
-- **turborepo-check.yml** (infra repo) — Vault dev secrets (OIDC) + `bun run check` on `turborepo/**`
-- **publish-turborepo.yml** (infra repo) — build + push GHCR image → dispatch infra deploy on main push
+- **ci-turborepo.yml** (infra repo) — Vault dev secrets (OIDC) + `bun run check` on `turborepo/**`; publishes GHCR image on API changes and dispatches **Deploy fleet**
 
 ## Client usage
 

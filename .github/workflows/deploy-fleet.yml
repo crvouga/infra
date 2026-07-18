@@ -1,4 +1,4 @@
-name: Deploy Pipeline
+name: Deploy fleet
 
 # Railway stack — fully automated via GitHub Actions.
 #
@@ -20,6 +20,8 @@ on:
       - "**/*.md"
       - ".vscode/**"
       - ".cursor/**"
+      - "vault/**"
+      - "turborepo/**"
   repository_dispatch:
     types:
       - deploy-service
@@ -41,7 +43,7 @@ on:
         default: true
 
 concurrency:
-  group: deploy-pipeline-${{ github.ref }}
+  group: deploy-fleet-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:

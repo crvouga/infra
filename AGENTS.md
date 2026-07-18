@@ -17,14 +17,14 @@ Public DNS hostnames stay on the zone (`portfolio.chrisvouga.dev`, etc.); Railwa
 
 ## Standalone vault (`vault/`)
 
-Vault is **`standalone: true`** in [`services.yaml`](services.yaml) — excluded from the fleet **Deploy Pipeline**, fleet DNS sync, and `destroy-fly`. It bootstraps from **GitHub repo secrets** (or exported env), not Vault KV / OIDC.
+Vault is **`standalone: true`** in [`services.yaml`](services.yaml) — excluded from the fleet **Deploy fleet** workflow, fleet DNS sync, and `destroy-fly`. It bootstraps from **GitHub repo secrets** (or exported env), not Vault KV / OIDC.
 
 | Resource | Value |
 | -------- | ----- |
 | Railway service | `vault` |
 | Public hostname | `vault.chrisvouga.dev` |
 | GHCR image | `ghcr.io/crvouga/chrisvouga-vault` |
-| CI | **Vault deploy** (`.github/workflows/vault-deploy.yml`) on `vault/**` changes |
+| CI | **Deploy vault** (`.github/workflows/deploy-vault.yml`) on `vault/**` changes |
 
 **Bootstrap order (first deploy or rebuild):**
 
@@ -32,7 +32,7 @@ Vault is **`standalone: true`** in [`services.yaml`](services.yaml) — excluded
 2. Deploy vault: push `vault/**` to `main`, or `cd vault && make gh` → run workflow
 3. Init/unseal OpenBao locally (`vault/scripts/init.sh`); store keys in `crvouga.kv`
 4. Seed KV at `secret/data/personal/prd` (Railway token, Cloudflare, per-app keys)
-5. Fleet: `bun run provision-railway --apply` then **Deploy Pipeline**
+5. Fleet: `bun run provision-railway --apply` then **Deploy fleet**
 
 **Local vault ops (Vault may be down — no `vault run`):**
 
@@ -53,8 +53,8 @@ If `vault run` fails with `No value found at secret/personal/prd`, KV is empty �
 ## Turborepo remote cache (`turborepo/`)
 
 - Nested Bun monorepo; `cd turborepo && bun install` for local dev.
-- CI: **Turborepo check** on `turborepo/**`; **Publish turborepo image** on API changes.
-- Deploy: publish dispatches infra **Deploy Pipeline** for `turborepo`.
+- CI: **CI turborepo** (`.github/workflows/ci-turborepo.yml`) on `turborepo/**` — check + publish on API changes.
+- Deploy: publish dispatches infra **Deploy fleet** for `turborepo`.
 - See [`turborepo/AGENTS.md`](turborepo/AGENTS.md) for secrets and client usage.
 
 ## Hard rules

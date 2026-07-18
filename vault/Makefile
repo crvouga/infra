@@ -4,7 +4,7 @@
 	provision deploy destroy railway-sync-dns
 
 gh:
-	open "https://github.com/crvouga/infra/actions/workflows/vault-deploy.yml"
+	open "https://github.com/crvouga/infra/actions/workflows/deploy-vault.yml"
 
 provision:
 	chmod +x scripts/railway-provision.sh
