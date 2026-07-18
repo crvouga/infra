@@ -21,10 +21,12 @@ PAGE_SIZE=1000
 
 B2_AUTH_TOKEN=""
 B2_API_URL=""
+B2_ACCOUNT_ID=""
 B2_BUCKET_ID=""
 B2_BUCKET_NAME=""
 B2_KEY_ID=""
 B2_APP_KEY=""
+B2_BUCKET_JSON="{}"
 
 CREDS_JSON="{}"
 
@@ -33,6 +35,8 @@ FILES_DELETED=0
 FILES_UNLOCKED=0
 FILES_FAILED=0
 FILES_SKIPPED=0
+FILES_COMPLIANCE_BLOCKED=0
+COMPLIANCE_MAX_RETAIN_MS=0
 
 usage() {
   cat <<EOF
@@ -188,7 +192,7 @@ b2_authorize_and_bucket() {
   local key_id="$1"
   local app_key="$2"
   local bucket_name="$3"
-  local auth_response account_id buckets bucket_id basic
+  local auth_response buckets bucket_json basic
 
   basic="$(printf '%s:%s' "$key_id" "$app_key" | base64 | tr -d '\n')"
   auth_response="$(
@@ -203,21 +207,69 @@ b2_authorize_and_bucket() {
 
   B2_AUTH_TOKEN="$(echo "$auth_response" | jq -r '.authorizationToken')"
   B2_API_URL="$(echo "$auth_response" | jq -r '.apiUrl')"
-  account_id="$(echo "$auth_response" | jq -r '.accountId')"
+  B2_ACCOUNT_ID="$(echo "$auth_response" | jq -r '.accountId')"
   B2_BUCKET_NAME="$bucket_name"
 
   buckets="$(
     b2_post "${B2_API_URL}/b2api/v2/b2_list_buckets" \
-      "$(jq -nc --arg id "$account_id" '{accountId: $id, bucketTypes: ["allPrivate", "allPublic"]}')"
+      "$(jq -nc --arg id "$B2_ACCOUNT_ID" '{accountId: $id, bucketTypes: ["allPrivate", "allPublic"]}')"
   )"
 
-  bucket_id="$(echo "$buckets" | jq -r --arg name "$bucket_name" \
-    '.buckets[] | select(.bucketName == $name) | .bucketId' | head -1)"
-  if [ -z "$bucket_id" ]; then
+  bucket_json="$(echo "$buckets" | jq -c --arg name "$bucket_name" \
+    '.buckets[] | select(.bucketName == $name)' | head -1)"
+  if [ -z "$bucket_json" ] || [ "$bucket_json" = "null" ]; then
     echo "ERROR: Bucket not found: ${bucket_name}" >&2
     exit 1
   fi
-  B2_BUCKET_ID="$bucket_id"
+  B2_BUCKET_JSON="$bucket_json"
+  B2_BUCKET_ID="$(echo "$bucket_json" | jq -r '.bucketId')"
+}
+
+# Stop new uploads from inheriting compliance/governance default retention.
+# Object Lock itself cannot be disabled once enabled; only the default can be cleared.
+clear_bucket_default_retention() {
+  local mode period_json payload
+
+  mode="$(echo "$B2_BUCKET_JSON" | jq -r '
+    .fileLockConfiguration.value.defaultRetention.mode
+    // .fileLockConfiguration.defaultRetention.mode
+    // empty
+  ')"
+  period_json="$(echo "$B2_BUCKET_JSON" | jq -c '
+    .fileLockConfiguration.value.defaultRetention.period
+    // .fileLockConfiguration.defaultRetention.period
+    // null
+  ')"
+
+  if [ -z "$mode" ] || [ "$mode" = "null" ]; then
+    echo "==> Bucket default retention already unset (Object Lock may still be enabled)"
+    return 0
+  fi
+
+  echo "==> Bucket default retention is mode=${mode} period=${period_json}"
+  if [ "$CONFIRM" = false ]; then
+    echo "    would clear default retention so new uploads are not auto-locked"
+    return 0
+  fi
+
+  payload="$(
+    jq -nc \
+      --arg accountId "$B2_ACCOUNT_ID" \
+      --arg bucketId "$B2_BUCKET_ID" \
+      '{
+        accountId: $accountId,
+        bucketId: $bucketId,
+        defaultRetention: { mode: null, period: null }
+      }'
+  )"
+  if b2_post "${B2_API_URL}/b2api/v2/b2_update_bucket" "$payload" >/dev/null; then
+    echo "    cleared default retention (existing compliance objects remain locked)"
+    B2_BUCKET_JSON="$(echo "$B2_BUCKET_JSON" | jq -c '
+      .fileLockConfiguration.value.defaultRetention = {mode: null, period: null}
+    ')"
+  else
+    echo "    WARN: could not clear default retention — new uploads may still auto-lock" >&2
+  fi
 }
 
 try_s3_recursive_delete() {
@@ -263,13 +315,49 @@ try_s3_recursive_delete() {
   fi
 }
 
+# B2 list/get APIs nest Object Lock fields under .value when the client can read them.
+file_legal_hold_value() {
+  echo "$1" | jq -r '
+    if (.legalHold | type) == "object" then (.legalHold.value // empty)
+    else (.legalHold // empty) end
+  '
+}
+
+file_retention_mode() {
+  echo "$1" | jq -r '
+    if (.fileRetention | type) == "object" then
+      (.fileRetention.value.mode // .fileRetention.mode // empty)
+    else empty end
+  '
+}
+
+file_retention_until() {
+  echo "$1" | jq -r '
+    if (.fileRetention | type) == "object" then
+      (.fileRetention.value.retainUntilTimestamp // .fileRetention.retainUntilTimestamp // 0)
+    else 0 end
+  '
+}
+
+format_retain_until() {
+  local ms="$1"
+  if [ -z "$ms" ] || [ "$ms" = "0" ] || [ "$ms" = "null" ]; then
+    printf 'unknown'
+    return 0
+  fi
+  python3 -c 'from datetime import datetime,timezone; import sys; print(datetime.fromtimestamp(int(sys.argv[1])/1000, tz=timezone.utc).isoformat())' "$ms" 2>/dev/null \
+    || printf 'epoch_ms=%s' "$ms"
+}
+
 unlock_file_if_needed() {
   local file_json="$1"
   local file_id file_name legal_hold retention_mode retain_until payload
 
   file_id="$(echo "$file_json" | jq -r '.fileId')"
   file_name="$(echo "$file_json" | jq -r '.fileName')"
-  legal_hold="$(echo "$file_json" | jq -r '.legalHold // empty')"
+  legal_hold="$(file_legal_hold_value "$file_json")"
+  retention_mode="$(file_retention_mode "$file_json")"
+  retain_until="$(file_retention_until "$file_json")"
 
   if [ "$legal_hold" = "on" ]; then
     if [ "$CONFIRM" = true ]; then
@@ -286,41 +374,63 @@ unlock_file_if_needed() {
     fi
   fi
 
-  if echo "$file_json" | jq -e '.fileRetention' >/dev/null 2>&1; then
-    retention_mode="$(echo "$file_json" | jq -r '.fileRetention.mode // empty')"
-    retain_until="$(echo "$file_json" | jq -r '.fileRetention.retainUntilTimestamp // 0')"
-    if [ -n "$retention_mode" ] && [ "$retention_mode" != "null" ]; then
-      if [ "$CONFIRM" = true ]; then
-        payload="$(
-          jq -nc \
-            --arg id "$file_id" \
-            --arg name "$file_name" \
-            --arg mode "$retention_mode" \
-            '{fileId: $id, fileName: $name, bypassGovernance: true, fileRetention: {mode: $mode, retainUntilTimestamp: 1}}'
-        )"
-        if b2_post "${B2_API_URL}/b2api/v2/b2_update_file_retention" "$payload" >/dev/null; then
-          FILES_UNLOCKED=$((FILES_UNLOCKED + 1))
-          echo "    cleared retention (${retention_mode}, was ${retain_until}): ${file_name}"
-        else
-          echo "    WARN: could not clear retention (${retention_mode}): ${file_name}" >&2
-        fi
-      else
-        echo "    would clear retention (${retention_mode}): ${file_name}"
-        FILES_UNLOCKED=$((FILES_UNLOCKED + 1))
-      fi
+  if [ -z "$retention_mode" ] || [ "$retention_mode" = "null" ]; then
+    return 0
+  fi
+
+  if [ "$retention_mode" = "compliance" ]; then
+    # Reported as BLOCKED in delete_file_version — cannot be bypassed.
+    return 0
+  fi
+
+  # governance mode can be cleared with bypassGovernance
+  if [ "$CONFIRM" = true ]; then
+    payload="$(
+      jq -nc \
+        --arg id "$file_id" \
+        --arg name "$file_name" \
+        '{fileId: $id, fileName: $name, bypassGovernance: true, fileRetention: {mode: null, retainUntilTimestamp: null}}'
+    )"
+    if b2_post "${B2_API_URL}/b2api/v2/b2_update_file_retention" "$payload" >/dev/null; then
+      FILES_UNLOCKED=$((FILES_UNLOCKED + 1))
+      echo "    cleared retention (${retention_mode}, was ${retain_until}): ${file_name}"
+    else
+      echo "    WARN: could not clear retention (${retention_mode}): ${file_name}" >&2
     fi
+  else
+    echo "    would clear retention (${retention_mode}): ${file_name}"
+    FILES_UNLOCKED=$((FILES_UNLOCKED + 1))
   fi
 }
 
 delete_file_version() {
   local file_json="$1"
-  local file_id file_name file_action payload response
+  local file_id file_name file_action payload response retention_mode retain_until
 
   file_id="$(echo "$file_json" | jq -r '.fileId')"
   file_name="$(echo "$file_json" | jq -r '.fileName')"
   file_action="$(echo "$file_json" | jq -r '.action // "upload"')"
+  retention_mode="$(file_retention_mode "$file_json")"
+  retain_until="$(file_retention_until "$file_json")"
 
   unlock_file_if_needed "$file_json"
+
+  if [ "$retention_mode" = "compliance" ]; then
+    FILES_COMPLIANCE_BLOCKED=$((FILES_COMPLIANCE_BLOCKED + 1))
+    FILES_FAILED=$((FILES_FAILED + 1))
+    if [ -n "$retain_until" ] && [ "$retain_until" != "0" ] && [ "$retain_until" != "null" ]; then
+      if [ "$retain_until" -gt "$COMPLIANCE_MAX_RETAIN_MS" ] 2>/dev/null; then
+        COMPLIANCE_MAX_RETAIN_MS="$retain_until"
+      fi
+    fi
+    # Keep noise down: log the first few, then summarize at the end.
+    if [ "$FILES_COMPLIANCE_BLOCKED" -le 5 ]; then
+      echo "    BLOCKED compliance until $(format_retain_until "$retain_until"): ${file_name}" >&2
+    elif [ "$FILES_COMPLIANCE_BLOCKED" -eq 6 ]; then
+      echo "    BLOCKED compliance: … (further objects omitted; see summary)" >&2
+    fi
+    return 1
+  fi
 
   if [ "$CONFIRM" = false ]; then
     echo "    would delete (${file_action}): ${file_name} (${file_id})"
@@ -455,6 +565,7 @@ echo "    vault path: ${MOUNT_PATH}/${PROJECT}/${VAULT_CONFIG}"
 echo ""
 
 b2_authorize_and_bucket "$B2_KEY_ID" "$B2_APP_KEY" "$B2_BUCKET_NAME"
+clear_bucket_default_retention
 try_s3_recursive_delete
 b2_authorize_and_bucket "$B2_KEY_ID" "$B2_APP_KEY" "$B2_BUCKET_NAME"
 clear_bucket_native
@@ -473,11 +584,22 @@ echo "Unlock actions:   ${FILES_UNLOCKED}"
 echo "Delete actions:   ${FILES_DELETED}"
 echo "Skipped:          ${FILES_SKIPPED}"
 echo "Failed deletes:   ${FILES_FAILED}"
+echo "Compliance locked:${FILES_COMPLIANCE_BLOCKED}"
 echo ""
+
+if [ "$FILES_COMPLIANCE_BLOCKED" -gt 0 ]; then
+  echo "ERROR: ${FILES_COMPLIANCE_BLOCKED} file version(s) are locked in compliance mode." >&2
+  echo "Backblaze cannot bypass compliance Object Lock (including support)." >&2
+  echo "Earliest these objects can be deleted: $(format_retain_until "$COMPLIANCE_MAX_RETAIN_MS")" >&2
+  echo "Until then: leave this bucket, or create a new bucket without default retention." >&2
+  exit 1
+fi
+
+if [ "$FILES_FAILED" -gt 0 ]; then
+  echo "ERROR: ${FILES_FAILED} file version(s) could not be deleted." >&2
+  exit 1
+fi
+
 echo "When the bucket is empty, delete it from the Backblaze console or with the B2 CLI:"
 echo "  b2 delete-bucket ${B2_BUCKET_NAME}"
 echo ""
-
-if [ "$FILES_FAILED" -gt 0 ]; then
-  exit 1
-fi

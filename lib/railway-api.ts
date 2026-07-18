@@ -910,6 +910,87 @@ export async function resolveProjectContext(
   return ctx;
 }
 
+export type RailwayDeployment = {
+  readonly id: string;
+  readonly status: string;
+  readonly createdAt: string;
+};
+
+type DeploymentsPage = {
+  readonly deployments: {
+    readonly edges: readonly Edge<RailwayDeployment>[];
+    readonly pageInfo: {
+      readonly hasNextPage: boolean;
+      readonly endCursor: string | null;
+    };
+  };
+};
+
+export async function listDeployments(input: {
+  readonly projectId: string;
+  readonly serviceId: string;
+  readonly environmentId: string;
+  readonly pageSize?: number;
+}): Promise<readonly RailwayDeployment[]> {
+  const pageSize = input.pageSize ?? 50;
+  const deployments: RailwayDeployment[] = [];
+  let after: string | undefined;
+
+  for (;;) {
+    const data: DeploymentsPage = await railwayRequest<DeploymentsPage>(
+      `
+      query deployments($input: DeploymentListInput!, $first: Int, $after: String) {
+        deployments(input: $input, first: $first, after: $after) {
+          edges {
+            node {
+              id
+              status
+              createdAt
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    `,
+      {
+        input: {
+          projectId: input.projectId,
+          serviceId: input.serviceId,
+          environmentId: input.environmentId,
+        },
+        first: pageSize,
+        after,
+      },
+    );
+
+    for (const edge of data.deployments.edges) {
+      deployments.push(edge.node);
+    }
+
+    const { hasNextPage, endCursor } = data.deployments.pageInfo;
+    if (!hasNextPage || !endCursor) {
+      break;
+    }
+    after = endCursor;
+  }
+
+  return deployments;
+}
+
+export async function removeDeployment(deploymentId: string): Promise<void> {
+  await railwayRequest<{ deploymentRemove: boolean }>(
+    `
+    mutation deploymentRemove($id: String!) {
+      deploymentRemove(id: $id)
+    }
+  `,
+    { id: deploymentId },
+  );
+}
+
 export async function waitForDeployment(
   deploymentId: string,
   timeoutMs = 600_000,
