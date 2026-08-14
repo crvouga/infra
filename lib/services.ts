@@ -56,6 +56,11 @@ export type ServiceSpec = {
   readonly source_code_url: string;
   readonly dockerfile: string;
   readonly build_context: string;
+  /**
+   * Full image ref override (e.g. `decolua/9router:latest`).
+   * When set, skips GHCR naming and is used verbatim (ignores `--image-tag`).
+   */
+  readonly image?: string;
   /** Container listen port; required for public HTTP services. */
   readonly port?: number;
   readonly health_check: boolean;
@@ -187,7 +192,15 @@ export function imageRepo(config: ServicesConfig, id: string): string {
   return `ghcr.io/${config.image_owner}/${imagePackageName(config, id)}`;
 }
 
+/** True when the service pulls a non-GHCR image via `image:`. */
+export function usesExternalImage(service: ServiceSpec): boolean {
+  return Boolean(service.image?.trim());
+}
+
 export function imageRef(config: ServicesConfig, id: string, tag?: string): string {
+  const service = findService(config, id);
+  const external = service?.image?.trim();
+  if (external) return external;
   const resolvedTag = tag?.trim() || config.default_image_tag;
   return `${imageRepo(config, id)}:${resolvedTag}`;
 }

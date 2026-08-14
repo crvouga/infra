@@ -14,6 +14,7 @@ import {
   infraGithubRepo,
   isAlwaysOn,
   loadServicesConfig,
+  usesExternalImage,
   type ServiceSpec,
 } from "../lib/services.js";
 
@@ -47,6 +48,11 @@ async function main(): Promise<void> {
   console.log(`Make ghcr packages public (${dryRun ? "DRY-RUN" : "APPLY"}) services=${services.length}`);
 
   for (const service of services) {
+    if (usesExternalImage(service)) {
+      console.log(`  skip ${service.id}: external image ${service.image}`);
+      continue;
+    }
+
     const names = new Set<string>([
       imagePackageName(config, service.id),
       ...(LEGACY_PACKAGE_NAMES[service.id] ?? []),

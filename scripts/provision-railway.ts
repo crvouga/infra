@@ -41,6 +41,7 @@ import {
   railwayVolume,
   railwayHealthcheckSetting,
   serviceHealthPath,
+  usesExternalImage,
   type ServiceSpec,
   type ServicesConfig,
 } from "../lib/services.js";
@@ -168,12 +169,14 @@ async function provisionService(
     numReplicas: 1,
   });
 
-  await ensureGhcrPackagePublic(config, service.id);
+  if (!usesExternalImage(service)) {
+    await ensureGhcrPackagePublic(config, service.id);
 
-  await ensureRailwayGhcrPullCredentials({
-    serviceId: railwayService.id,
-    environmentId,
-  });
+    await ensureRailwayGhcrPullCredentials({
+      serviceId: railwayService.id,
+      environmentId,
+    });
+  }
 
   if (created) {
     await connectServiceImage(railwayService.id, image);

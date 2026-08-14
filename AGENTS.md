@@ -7,6 +7,7 @@
 | Railway project | from `services.yaml` → `railway.project` | `infra` |
 | Railway service | service `id` (no prefix) | `portfolio`, `vault` |
 | GHCR image | `chrisvouga-<id>` | `ghcr.io/crvouga/chrisvouga-portfolio` |
+| External image | optional `image:` in `services.yaml` (verbatim; skips GHCR) | `decolua/9router:latest` |
 | S3 bucket (when owned by this stack) | `crvouga-<purpose>` or existing shared bucket keys in Vault | — |
 
 Railway names come from [`services.yaml`](services.yaml) via `railwayServiceName()` in [`lib/services.ts`](lib/services.ts) — defaults to the service `id`. Legacy Fly.io apps used the `crvouga-` prefix; see `legacyFlyAppName()`.

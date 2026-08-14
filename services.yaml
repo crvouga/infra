@@ -213,3 +213,34 @@ services:
     secrets:
       - name: DB_CONNECTION_URI
         source: env
+
+  - id: 9router
+    hostname: 9router.chrisvouga.dev
+    github_repo: decolua/9router
+    source_code_url: https://github.com/decolua/9router
+    dockerfile: ./Dockerfile
+    build_context: .
+    image: decolua/9router:latest
+    port: 20128
+    health_check: true
+    health_path: /api/health
+    railway:
+      volume:
+        name: 9router-data
+        mount_path: /app/data
+    env:
+      DATA_DIR: /app/data
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+      NEXT_PUBLIC_BASE_URL: "https://9router.chrisvouga.dev"
+      BASE_URL: "https://9router.chrisvouga.dev"
+      AUTH_COOKIE_SECURE: "true"
+    secrets:
+      - name: JWT_SECRET
+        source: vault
+      - name: INITIAL_PASSWORD
+        source: vault
+      - name: API_KEY_SECRET
+        source: vault
+      - name: MACHINE_ID_SALT
+        source: vault
