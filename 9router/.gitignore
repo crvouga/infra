@@ -1,0 +1,6 @@
+.env
+app/
+data/
+.pids/
+node_modules/
+*.log

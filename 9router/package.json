@@ -1,0 +1,20 @@
+{
+  "name": "9router-local",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pull-secrets": "tsx scripts/pull-secrets.ts",
+    "sync-app": "tsx scripts/sync-app.ts",
+    "install-app": "tsx scripts/install-app.ts",
+    "build": "tsx scripts/build.ts",
+    "up": "tsx scripts/start.ts",
+    "down": "tsx scripts/stop.ts",
+    "status": "tsx scripts/status.ts",
+    "setup": "npm run pull-secrets && npm run sync-app && npm run install-app && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "tsx": "^4.19.4",
+    "typescript": "^5.9.3"
+  }
+}

@@ -59,7 +59,7 @@ export type ServiceSpec = {
   readonly dockerfile: string;
   readonly build_context: string;
   /**
-   * Full image ref override (e.g. `decolua/9router:latest`).
+   * Full image ref override (e.g. `ghcr.io/example/app:latest`).
    * When set, skips GHCR naming and is used verbatim (ignores `--image-tag`).
    */
   readonly image?: string;

@@ -7,7 +7,7 @@
 | Railway project | from `services.yaml` → `railway.project` | `infra` |
 | Railway service | service `id` (no prefix) | `portfolio`, `vault` |
 | GHCR image | `chrisvouga-<id>` | `ghcr.io/crvouga/chrisvouga-portfolio` |
-| External image | optional `image:` in `services.yaml` (verbatim; skips GHCR) | `decolua/9router:latest` |
+| External image | optional `image:` in `services.yaml` (verbatim; skips GHCR) | `ghcr.io/example/app:latest` |
 | S3 bucket (when owned by this stack) | `crvouga-<purpose>` or existing shared bucket keys in Vault | — |
 
 Railway names come from [`services.yaml`](services.yaml) via `railwayServiceName()` in [`lib/services.ts`](lib/services.ts) — defaults to the service `id`. Legacy Fly.io apps used the `crvouga-` prefix; see `legacyFlyAppName()`.
@@ -57,6 +57,10 @@ If `vault run` fails with `No value found at secret/personal/prd`, KV is empty �
 - CI: **CI turborepo** (`.github/workflows/ci-turborepo.yml`) on `turborepo/**` — check + publish on API changes.
 - Deploy: publish dispatches infra **Deploy fleet** for `turborepo`.
 - See [`turborepo/AGENTS.md`](turborepo/AGENTS.md) for secrets and client usage.
+
+## Local 9router (`9router/`)
+
+Not on Railway. Local Node/npm only at `http://127.0.0.1:20128`. See [`9router/README.md`](9router/README.md): `cd 9router && npm i && npm run setup && npm run up`.
 
 ## Hard rules
 
