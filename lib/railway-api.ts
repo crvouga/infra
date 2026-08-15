@@ -435,6 +435,7 @@ export async function updateServiceInstance(input: {
   readonly sleepApplication?: boolean;
   readonly region?: string;
   readonly numReplicas?: number;
+  readonly startCommand?: string | null;
   readonly registryCredentials?: { readonly username: string; readonly password: string };
 }): Promise<void> {
   const patch: Record<string, unknown> = {};
@@ -442,6 +443,7 @@ export async function updateServiceInstance(input: {
   if (input.sleepApplication != null) patch.sleepApplication = input.sleepApplication;
   if (input.region) patch.region = input.region;
   if (input.numReplicas != null) patch.numReplicas = input.numReplicas;
+  if (input.startCommand !== undefined) patch.startCommand = input.startCommand;
   if (input.registryCredentials) patch.registryCredentials = input.registryCredentials;
 
   await railwayRequest<{ serviceInstanceUpdate: boolean }>(

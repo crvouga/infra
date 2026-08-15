@@ -228,6 +228,9 @@ services:
       volume:
         name: 9router-data
         mount_path: /app/data
+      # Upstream OAuthModal hardcodes http://localhost:${port}/callback (breaks remote Claude OAuth).
+      # At boot, patch Next bundles so redirect_uri uses window.location.origin + /callback.
+      start_command: "sh -c 'echo Y29uc3QgZnMgPSByZXF1aXJlKCJmcyIpOwpjb25zdCBwYXRoID0gcmVxdWlyZSgicGF0aCIpOwpjb25zdCByZSA9IC9gaHR0cDpcL1wvbG9jYWxob3N0OlwkXHtbXn1dK1x9XC9jYWxsYmFja2AvZzsKZnVuY3Rpb24gd2FsayhkKSB7CiAgbGV0IGVudHJpZXM7CiAgdHJ5IHsKICAgIGVudHJpZXMgPSBmcy5yZWFkZGlyU3luYyhkLCB7IHdpdGhGaWxlVHlwZXM6IHRydWUgfSk7CiAgfSBjYXRjaCB7CiAgICByZXR1cm47CiAgfQogIGZvciAoY29uc3QgZSBvZiBlbnRyaWVzKSB7CiAgICBjb25zdCBwID0gcGF0aC5qb2luKGQsIGUubmFtZSk7CiAgICBpZiAoZS5pc0RpcmVjdG9yeSgpKSB3YWxrKHApOwogICAgZWxzZSBpZiAocC5lbmRzV2l0aCgiLmpzIikpIHsKICAgICAgY29uc3QgdCA9IGZzLnJlYWRGaWxlU3luYyhwLCAidXRmOCIpOwogICAgICBjb25zdCBuID0gdC5yZXBsYWNlKHJlLCAnd2luZG93LmxvY2F0aW9uLm9yaWdpbisiL2NhbGxiYWNrIicpOwogICAgICBpZiAobiAhPT0gdCkgewogICAgICAgIGZzLndyaXRlRmlsZVN5bmMocCwgbik7CiAgICAgICAgY29uc29sZS5sb2coIm9hdXRoLXJlZGlyZWN0IHBhdGNoZWQiLCBwKTsKICAgICAgfQogICAgfQogIH0KfQp3YWxrKCIvYXBwLy5uZXh0Iik7Cg== | base64 -d > /tmp/oauth-redirect-patch.js && node /tmp/oauth-redirect-patch.js && exec node custom-server.js'"
     env:
       DATA_DIR: /app/data
       HOSTNAME: "0.0.0.0"

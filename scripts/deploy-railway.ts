@@ -27,6 +27,7 @@ import {
   railwayRegion,
   railwayServiceName,
   railwaySleep,
+  railwayStartCommand,
   type ServiceSpec,
   type ServicesConfig,
 } from "../lib/services.js";
@@ -88,13 +89,15 @@ async function deployOne(
   }
 
   const healthcheckPath = railwayHealthcheckSetting(service);
-  if (healthcheckPath !== undefined) {
+  const startCommand = railwayStartCommand(service);
+  if (healthcheckPath !== undefined || startCommand !== undefined) {
     await updateServiceInstance({
       serviceId: railwayService.id,
       environmentId: environment.id,
       healthcheckPath,
       sleepApplication: railwaySleep(service),
       region: railwayRegion(config),
+      startCommand: startCommand ?? null,
     });
   }
 

@@ -40,6 +40,7 @@ import {
   railwaySleep,
   railwayVolume,
   railwayHealthcheckSetting,
+  railwayStartCommand,
   serviceHealthPath,
   usesExternalImage,
   type ServiceSpec,
@@ -167,6 +168,7 @@ async function provisionService(
     sleepApplication: railwaySleep(service),
     region: railwayRegion(config),
     numReplicas: 1,
+    startCommand: railwayStartCommand(service) ?? null,
   });
 
   if (!usesExternalImage(service)) {

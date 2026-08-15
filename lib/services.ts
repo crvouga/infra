@@ -33,6 +33,8 @@ export type RailwayServiceConfig = {
   readonly health_path?: string;
   /** When false, disable Railway deploy healthcheck (e.g. OpenBao is sealed until CI unseals). */
   readonly health_check?: boolean;
+  /** Optional Railway start command override (replaces image CMD). */
+  readonly start_command?: string;
   readonly volume?: RailwayVolumeConfig;
 };
 
@@ -139,6 +141,11 @@ export function railwayIsPublic(service: ServiceSpec): boolean {
 
 export function railwayVolume(service: ServiceSpec): RailwayVolumeConfig | undefined {
   return service.railway?.volume;
+}
+
+export function railwayStartCommand(service: ServiceSpec): string | undefined {
+  const cmd = service.railway?.start_command?.trim();
+  return cmd || undefined;
 }
 
 export function serviceHealthPath(service: ServiceSpec): string | undefined {
