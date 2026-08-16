@@ -90,7 +90,35 @@ type RegistryEntry = {
   category?: string;
   hidden?: boolean;
   authModes?: string[];
+  display?: {
+    name?: string;
+    website?: string;
+    notice?: {
+      apiKeyUrl?: string;
+      signupUrl?: string;
+      text?: string;
+    };
+  };
 };
+
+export type RegistryMeta = {
+  id: string;
+  name: string;
+  helpUrl: string | null;
+  category?: string;
+};
+
+export function credentialHelpUrl(entry: {
+  display?: RegistryEntry["display"];
+}): string | null {
+  const notice = entry.display?.notice;
+  return (
+    notice?.apiKeyUrl?.trim() ||
+    notice?.signupUrl?.trim() ||
+    entry.display?.website?.trim() ||
+    null
+  );
+}
 
 async function loadRegistryEntries(): Promise<RegistryEntry[]> {
   const registryPath = join(APP_DIR, "open-sse/providers/registry/index.js");
@@ -100,6 +128,54 @@ async function loadRegistryEntries(): Promise<RegistryEntry[]> {
     throw new Error(`Provider registry at ${registryPath} did not export an array`);
   }
   return entries;
+}
+
+export async function loadRegistryMeta(): Promise<Map<string, RegistryMeta>> {
+  const map = new Map<string, RegistryMeta>();
+  for (const entry of await loadRegistryEntries()) {
+    if (!entry?.id) continue;
+    map.set(entry.id, {
+      id: entry.id,
+      name: entry.display?.name?.trim() || entry.id,
+      helpUrl: credentialHelpUrl(entry),
+      category: entry.category,
+    });
+  }
+  return map;
+}
+
+/**
+ * Walk queue: combo-referenced API-key/cookie providers first, then remaining
+ * apikey/cookie catalog entries. Pass comboOnly to stop after combo providers.
+ * OAuth/import methods are excluded (use sync-providers / dashboard).
+ */
+export function buildCredWalkQueue(
+  catalog: ResolvedProvider[],
+  comboProviderIds: Set<string>,
+  opts: { comboOnly?: boolean } = {},
+): ResolvedProvider[] {
+  const byId = new Map(catalog.map((p) => [p.id, p]));
+  const queue: ResolvedProvider[] = [];
+  const seen = new Set<string>();
+
+  const isApiKeyish = (p: ResolvedProvider) =>
+    p.method === "apikey" || p.method === "cookie";
+
+  const push = (id: string) => {
+    if (seen.has(id)) return;
+    const p = byId.get(id);
+    if (!p || !isApiKeyish(p)) return;
+    seen.add(id);
+    queue.push(p);
+  };
+
+  for (const id of [...comboProviderIds].sort()) push(id);
+  if (opts.comboOnly) return queue;
+
+  for (const p of catalog) {
+    if (isApiKeyish(p)) push(p.id);
+  }
+  return queue;
 }
 
 export function loadProvidersSpec(path = PROVIDERS_SPEC_PATH): ProvidersSpec {
@@ -329,6 +405,13 @@ export async function syncOneProvider(
     if (opts.dryRun) {
       return { id, kind: "created", detail: "dry-run interactive" };
     }
+    if (!supportsDeviceCodeOAuth(id)) {
+      return {
+        id,
+        kind: "skipped_interactive",
+        detail: `connect in dashboard at ${client.baseUrl} (no automated OAuth for this provider)`,
+      };
+    }
     try {
       await runInteractiveOAuth(client, id);
       return { id, kind: "created", detail: "interactive oauth" };
@@ -490,6 +573,18 @@ async function syncKiro(
       return { id, kind: "created", detail: "auto-import + import" };
     } catch (err) {
       if (!vaultRefresh && !apiKey) {
+        if (opts.interactive) {
+          try {
+            await runInteractiveOAuth(client, "kiro");
+            return { id, kind: "created", detail: "interactive device-code (after bad auto-import)" };
+          } catch (interactiveErr) {
+            return {
+              id,
+              kind: "failed",
+              detail: formatErr(interactiveErr),
+            };
+          }
+        }
         return {
           id,
           kind: "skipped_missing",
@@ -643,12 +738,36 @@ function formatErr(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Interactive device-code for kiro/github; other providers get a clear failure. */
-async function runInteractiveOAuth(
+/** Providers with working `/api/oauth/{id}/device-code` + poll automation. */
+export const DEVICE_CODE_PROVIDERS = new Set(["kiro", "github"]);
+
+export function supportsDeviceCodeOAuth(provider: string): boolean {
+  return DEVICE_CODE_PROVIDERS.has(provider);
+}
+
+/** Primary Vault field name for credential walkthrough prompts. */
+export function primaryVaultKey(provider: ResolvedProvider): string | null {
+  switch (provider.method) {
+    case "apikey":
+    case "cookie":
+      return provider.apiKeyVaultKey;
+    case "kiro-import":
+      return provider.vault?.refreshToken ?? "KIRO_REFRESH_TOKEN";
+    case "codex-import":
+      return provider.vault?.accessToken ?? "CODEX_ACCESS_TOKEN";
+    case "cursor-import":
+      return provider.vault?.accessToken ?? "CURSOR_ACCESS_TOKEN";
+    default:
+      return null;
+  }
+}
+
+/** Interactive device-code for kiro/github; other providers skip (caller handles). */
+export async function runInteractiveOAuth(
   client: NineRouterClient,
   provider: string,
 ): Promise<void> {
-  if (provider === "kiro" || provider === "github") {
+  if (supportsDeviceCodeOAuth(provider)) {
     await runDeviceCodeFlow(client, provider);
     return;
   }

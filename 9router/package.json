@@ -13,6 +13,7 @@
     "sync-combos": "tsx scripts/sync-combos.ts",
     "check-combos": "tsx scripts/check-combos.ts",
     "sync-providers": "tsx scripts/sync-providers.ts",
+    "setup-provider-creds": "tsx scripts/setup-provider-creds.ts",
     "sync-cursor": "tsx scripts/sync-cursor.ts",
     "provision-tunnel": "tsx scripts/provision-tunnel.ts",
     "tunnel": "tsx scripts/tunnel.ts",

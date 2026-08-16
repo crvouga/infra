@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ENV_FILE, REPO_ROOT, SECRET_KEYS, type SecretKey } from "./paths.ts";
 import { requireCmd, run } from "./spawn.ts";
 
@@ -141,4 +144,87 @@ export function applyVaultRunEnv(): void {
       }
     }
   }
+}
+
+function vaultAddr(): string {
+  return (
+    process.env.VAULT_ADDR?.trim() || "https://vault.chrisvouga.dev"
+  ).replace(/\/$/, "");
+}
+
+/** Patch KV via HTTP merge-patch (requires VAULT_TOKEN). */
+export async function patchVaultKvViaApi(
+  fields: Record<string, string>,
+  config: VaultKvConfig = defaultVaultKvConfig(),
+): Promise<void> {
+  const token = process.env.VAULT_TOKEN?.trim();
+  if (!token) throw new Error("VAULT_TOKEN not set");
+  if (Object.keys(fields).length === 0) return;
+  const path = vaultKvDataPath(config);
+  const res = await fetch(`${vaultAddr()}/v1/${path}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/merge-patch+json",
+    },
+    body: JSON.stringify({ data: fields }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Vault PATCH ${path} failed (${res.status}): ${text}`);
+  }
+}
+
+/** Patch KV via `vault kv patch` (active vault login session). */
+export function patchVaultKvViaCli(
+  fields: Record<string, string>,
+  config: VaultKvConfig = defaultVaultKvConfig(),
+): void {
+  requireCmd("vault");
+  if (Object.keys(fields).length === 0) return;
+  const kvPath = vaultKvCliPath(config);
+  const lookup = run("vault", ["token", "lookup"], { allowFail: true });
+  if (lookup.status !== 0) {
+    throw new Error(
+      `Not authenticated to Vault. Run: vault login -method=userpass username=crvouga`,
+    );
+  }
+  const dir = mkdtempSync(join(tmpdir(), "9r-vault-patch-"));
+  const file = join(dir, "patch.json");
+  try {
+    writeFileSync(file, JSON.stringify(fields), { mode: 0o600 });
+    const result = run("vault", ["kv", "patch", kvPath, `@${file}`], {
+      allowFail: true,
+    });
+    if (result.status !== 0) {
+      const detail = (result.stderr || result.stdout).trim();
+      throw new Error(
+        `vault kv patch ${kvPath} failed${detail ? `: ${detail}` : ""}`,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Patch secret/personal/{config} — HTTP when VAULT_TOKEN works, else CLI session.
+ */
+export async function patchVaultKv(
+  fields: Record<string, string>,
+  config: VaultKvConfig = defaultVaultKvConfig(),
+): Promise<void> {
+  if (Object.keys(fields).length === 0) return;
+  if (process.env.VAULT_TOKEN?.trim()) {
+    try {
+      await patchVaultKvViaApi(fields, config);
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("403") && !msg.includes("permission denied")) {
+        throw err;
+      }
+    }
+  }
+  patchVaultKvViaCli(fields, config);
 }

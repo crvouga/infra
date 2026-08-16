@@ -57,15 +57,29 @@ Logs: `.pids/9router.log`, `.pids/tunnel.log`.
 Recommended after `up` (or when adding Vault provider keys):
 
 ```bash
-npm run sync-providers   # connect providers from Vault / local auto-import
+npm run setup-provider-creds   # guided API-key paste → Vault → connect
+npm run sync-providers         # or sync whatever is already in Vault
 npm run sync-combos
-npm run check-combos     # registry + combo drift + credential coverage
-npm run sync-cursor      # Cursor BYOK model list (quit Cursor first)
+npm run check-combos           # registry + combo drift + credential coverage
+npm run sync-cursor            # Cursor BYOK model list (quit Cursor first)
 ```
 
 ## Providers (Vault-driven)
 
 [`providers.yaml`](providers.yaml) plus registry auto-discovery. With 9Router running:
+
+**Seed API-key credentials interactively** (opens get-key URLs, pastes into Vault, creates connections). OAuth providers are not included — use the dashboard or `sync-providers --interactive`:
+
+```bash
+npm run setup-provider-creds                 # combo API-key providers first, then rest
+npm run setup-provider-creds -- --combo-only # only combos.yaml API-key providers (e.g. glm, minimax)
+npm run setup-provider-creds -- --dry-run
+npm run setup-provider-creds -- --no-open    # print URLs only
+```
+
+Per step: paste the secret (hidden), empty/`s` to skip, `q` to quit.
+
+**Sync existing Vault keys into 9Router:**
 
 ```bash
 npm run sync-providers
@@ -75,13 +89,13 @@ npm run sync-providers -- --interactive   # device-code for kiro/github (opens b
 npm run sync-providers -- --strict        # exit 1 if combo-referenced providers still missing
 ```
 
-**Idempotent:** already-connected providers are skipped. Missing Vault/env credentials skip that provider (exit 0 unless `--strict` or a hard failure). Re-run after adding keys — only new providers are created.
+**Idempotent:** already-connected providers are skipped. Missing Vault/env credentials skip that provider (exit 0 unless `--strict` or a hard failure). Re-run after adding keys — only new providers are created. Unsupported browser OAuth with `--interactive` is skipped (not a hard fail).
 
 **Credential sources (priority):**
 
 1. Local auto-import — Cursor (`state.vscdb`) and Kiro (AWS SSO cache)
-2. Vault KV `secret/personal/prd` (or process env / `vault run`)
-3. `--interactive` device-code for kiro/github only
+2. Vault KV `secret/personal/prd` (or process env / `vault run` / `setup-provider-creds`)
+3. `--interactive` / setup CLI device-code for kiro/github
 
 **Vault key naming** (field name = env var; not written to `.env` by default):
 
@@ -93,7 +107,7 @@ npm run sync-providers -- --strict        # exit 1 if combo-referenced providers
 | Codex | `CODEX_ACCESS_TOKEN` (+ optional refresh/id/email) |
 | Cursor | `CURSOR_ACCESS_TOKEN` + `CURSOR_MACHINE_ID` (or local auto-import) |
 
-Browser-only OAuth (Claude Code, most subscription providers) is skipped unless you connect in the dashboard or use `--interactive` where supported.
+Browser-only OAuth (Claude Code, most subscription providers) is skipped unless you connect in the dashboard or use device-code where supported.
 
 ## Combos (declarative)
 
