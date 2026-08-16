@@ -113,11 +113,17 @@ export function llmModelsFor(
   return index.modelsByProviderOrdered.get(providerId) ?? [];
 }
 
+/** Safe defaults when combos.yaml omits a role override (avoid aggregators). */
+const DEFAULT_ROLE_PROVIDERS: Record<ComboRole, string[]> = {
+  free: ["kiro"],
+  cheap: ["glm", "minimax"],
+  subscription: ["claude", "codex", "cursor", "github"],
+};
+
 /**
  * Resolve provider ids for a semantic role.
- * - cheap: yaml roles.cheap (required for meaningful cheap tier)
- * - free: yaml override or category in {free, freeTier} (LLM-capable only)
- * - subscription: yaml override or category === oauth (LLM-capable only)
+ * Prefer yaml `roles:` overrides; otherwise use a coding-safe allowlist
+ * (registry free/oauth categories include aggregators like api-airforce).
  */
 export function providersInRole(
   role: ComboRole,
@@ -125,22 +131,19 @@ export function providersInRole(
   roles: CombosTemplateSpec["roles"] = {},
 ): string[] {
   const override = roles[role];
-  if (override && override.length > 0) {
-    return [...override];
-  }
+  const candidates =
+    override && override.length > 0
+      ? [...override]
+      : [...DEFAULT_ROLE_PROVIDERS[role]];
 
-  const ids: string[] = [];
-  for (const [id, category] of index.categoryByProvider) {
-    const hasLlm = (index.modelsByProviderOrdered.get(id)?.length ?? 0) > 0;
-    if (!hasLlm) continue;
-    if (role === "free") {
-      if (category === "free" || category === "freeTier") ids.push(id);
-    } else if (role === "subscription") {
-      if (category === "oauth") ids.push(id);
+  // Keep only providers that exist in the registry and have LLM models
+  return candidates.filter((id) => {
+    if (!index.modelsByProvider.has(id) && !index.byPrefix.has(id)) {
+      return false;
     }
-    // cheap has no registry signal without yaml override
-  }
-  return ids.sort();
+    const canonical = index.byPrefix.get(id) ?? id;
+    return (index.modelsByProviderOrdered.get(canonical)?.length ?? 0) > 0;
+  });
 }
 
 /** Rank LLM model ids: opus > sonnet > haiku heuristics, else registry order. */

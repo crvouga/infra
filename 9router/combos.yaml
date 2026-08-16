@@ -9,11 +9,11 @@ defaults:
   pick_per_provider: 2
 
 roles:
-  # Provider ids only (registry has no $ pricing). Cheap = coding-plan APIs.
+  # Provider ids only (never model ids). Keep these tight — registry
+  # free/oauth categories include aggregators that break coding combos.
   cheap: [glm, minimax]
-  # free / subscription default from registry category unless overridden:
-  # free: [kiro]
-  # subscription: [claude, codex, cursor, github]
+  free: [kiro]
+  subscription: [claude, codex, cursor, github]
 
 combos:
   - name: 9router-free
