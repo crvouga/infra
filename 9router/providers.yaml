@@ -1,0 +1,114 @@
+# Declarative provider connection catalog for local 9Router.
+# Sync: npm run sync-providers
+#
+# Entries here override auto-discovery from app/open-sse/providers/registry.
+# Unlisted apikey / freeTier providers default to method: apikey with vault key
+#   {PROVIDER_ID_UPPER_SNAKE}_API_KEY  (e.g. glm → GLM_API_KEY).
+#
+# Missing Vault/env credentials → skip (never abort the whole run).
+# Already-connected providers → skip (use --force to refresh API keys).
+version: 1
+defaults:
+  connectionName: vault
+
+# Prefer fleet/shared Vault field names when they already exist.
+vaultKeyOverrides:
+  openai: OPENAI_API_KEY
+  anthropic: ANTHROPIC_API_KEY
+  cloudflare-ai: CLOUDFLARE_API_TOKEN
+  gemini: GEMINI_API_KEY
+  groq: GROQ_API_KEY
+  deepseek: DEEPSEEK_API_KEY
+  mistral: MISTRAL_API_KEY
+  together: TOGETHER_API_KEY
+  fireworks: FIREWORKS_API_KEY
+  perplexity: PERPLEXITY_API_KEY
+  openrouter: OPENROUTER_API_KEY
+  xai: XAI_API_KEY
+  glm: GLM_API_KEY
+  minimax: MINIMAX_API_KEY
+  huggingface: HUGGINGFACE_API_KEY
+  azure: AZURE_OPENAI_API_KEY
+  nvidia: NVIDIA_API_KEY
+  vertex: VERTEX_API_KEY
+  baidu: BAIDU_API_KEY
+  tencent: TENCENT_API_KEY
+  codebuddy-cn: CODEBUDDY_CN_API_KEY
+
+providers:
+  # --- Importable OAuth / free (headless) ---
+  - id: kiro
+    method: kiro-import
+    vault:
+      refreshToken: KIRO_REFRESH_TOKEN
+      clientId: KIRO_CLIENT_ID
+      clientSecret: KIRO_CLIENT_SECRET
+      region: KIRO_REGION
+      apiKey: KIRO_API_KEY
+
+  - id: cursor
+    method: cursor-import
+    vault:
+      accessToken: CURSOR_ACCESS_TOKEN
+      machineId: CURSOR_MACHINE_ID
+
+  - id: codex
+    method: codex-import
+    vault:
+      accessToken: CODEX_ACCESS_TOKEN
+      refreshToken: CODEX_REFRESH_TOKEN
+      idToken: CODEX_ID_TOKEN
+      email: CODEX_EMAIL
+
+  # --- Ready / no credentials ---
+  - id: opencode
+    method: none
+
+  - id: ollama-local
+    method: none
+
+  - id: edge-tts
+    method: none
+
+  - id: local-device
+    method: none
+
+  # --- Browser / device-code OAuth (only with --interactive) ---
+  - id: claude
+    method: oauth-interactive
+  - id: github
+    method: oauth-interactive
+  - id: antigravity
+    method: oauth-interactive
+  - id: qoder
+    method: oauth-interactive
+  - id: kilocode
+    method: oauth-interactive
+  - id: cline
+    method: oauth-interactive
+  - id: clinepass
+    method: oauth-interactive
+  - id: codebuddy-intl
+    method: oauth-interactive
+  - id: kimi
+    method: oauth-interactive
+  - id: grok-cli
+    method: oauth-interactive
+  - id: gemini-cli
+    method: oauth-interactive
+
+  # Dual-auth OAuth providers: prefer API key from Vault when present
+  - id: xai
+    method: apikey
+  - id: codebuddy-cn
+    method: apikey
+
+  # --- Web cookie providers ---
+  - id: grok-web
+    method: cookie
+    vault:
+      apiKey: GROK_WEB_COOKIE
+  - id: perplexity-web
+    method: cookie
+    vault:
+      apiKey: PERPLEXITY_WEB_COOKIE

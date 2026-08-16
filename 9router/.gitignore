@@ -4,3 +4,7 @@ data/
 .pids/
 node_modules/
 *.log
+.cursor-synced-combos.json
+.cursor-sync-backup-*.json
+.cursor-tunnel-url
+.cloudflared/

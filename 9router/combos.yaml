@@ -1,0 +1,82 @@
+# Declarative LLM combo catalog for local 9Router.
+# Sync: npm run sync-combos   Check: npm run check-combos
+# Cursor model picker ids use the 9router- prefix.
+version: 1
+defaults:
+  strategy: fallback # fallback | round-robin | fusion
+  kind: llm
+
+combos:
+  - name: 9router-free
+    description: Zero-cost agentic coding via Kiro free tier
+    models:
+      - kr/claude-sonnet-4.5
+      - kr/glm-5
+      - kr/MiniMax-M2.5
+      - kr/claude-haiku-4.5
+
+  - name: 9router-free-fast
+    description: Fast free loops (haiku / cheap free models)
+    models:
+      - kr/claude-haiku-4.5
+      - kr/glm-5
+      - kr/MiniMax-M2.5
+
+  - name: 9router-budget
+    description: Cheap paid primary, free last (~$5–15/mo spillover)
+    models:
+      - glm/glm-5.1
+      - minimax/MiniMax-M2.7
+      - kr/claude-sonnet-4.5
+      - kr/glm-5
+
+  - name: 9router-max-sub-claude
+    description: Maximize Claude Code subscription, then cheap, then free
+    models:
+      - cc/claude-opus-5
+      - cc/claude-sonnet-5
+      - glm/glm-5.1
+      - kr/claude-sonnet-4.5
+
+  - name: 9router-max-sub-codex
+    description: Maximize OpenAI Codex subscription, then cheap, then free
+    models:
+      - cx/gpt-5.5
+      - cx/gpt-5.3-codex-spark
+      - glm/glm-5.1
+      - kr/claude-sonnet-4.5
+
+  - name: 9router-max-sub-cursor
+    description: Maximize Cursor subscription, then cheap, then free
+    models:
+      - cu/claude-4.6-opus-max
+      - cu/claude-4.5-sonnet-thinking
+      - cu/gpt-5.3-codex
+      - glm/glm-5.1
+      - kr/claude-sonnet-4.5
+
+  - name: 9router-max-sub-copilot
+    description: Maximize GitHub Copilot subscription, then cheap, then free
+    models:
+      - gh/claude-opus-4.7
+      - gh/claude-sonnet-4.6
+      - gh/gpt-5.4
+      - glm/glm-5.1
+      - kr/claude-sonnet-4.5
+
+  - name: 9router-always-on
+    description: Multi-subscription then cheap then free (zero downtime)
+    models:
+      - cc/claude-opus-5
+      - cx/gpt-5.5
+      - glm/glm-5.1
+      - minimax/MiniMax-M2.7
+      - kr/claude-sonnet-4.5
+
+  - name: 9router-agent-default
+    description: Daily driver — Claude Sonnet then cheap then free
+    models:
+      - cc/claude-sonnet-5
+      - glm/glm-5.1
+      - minimax/MiniMax-M2.7
+      - kr/claude-sonnet-4.5

@@ -10,7 +10,16 @@
     "up": "tsx scripts/start.ts",
     "down": "tsx scripts/stop.ts",
     "status": "tsx scripts/status.ts",
+    "sync-combos": "tsx scripts/sync-combos.ts",
+    "check-combos": "tsx scripts/check-combos.ts",
+    "sync-providers": "tsx scripts/sync-providers.ts",
+    "sync-cursor": "tsx scripts/sync-cursor.ts",
+    "provision-tunnel": "tsx scripts/provision-tunnel.ts",
+    "tunnel": "tsx scripts/tunnel.ts",
     "setup": "npm run pull-secrets && npm run sync-app && npm run install-app && npm run build"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",

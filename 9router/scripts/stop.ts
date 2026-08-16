@@ -1,31 +1,28 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { APP_PID_FILE, PID_DIR } from "./lib/paths.ts";
-
-function stopOne(name: string, file: string): boolean {
-  if (!existsSync(file)) return false;
-  const pid = Number(readFileSync(file, "utf8").trim());
-  try {
-    if (pid > 0) {
-      process.kill(pid, "SIGTERM");
-      console.log(`stopped ${name} (pid ${pid})`);
-    }
-  } catch {
-    console.log(`stale pid file ${file}`);
-  }
-  try {
-    unlinkSync(file);
-  } catch {
-    // ignore
-  }
-  return true;
-}
+import { applyEnvFile, loadEnvFile } from "./lib/env.ts";
+import { stopDaemon, stopPortOccupants } from "./lib/lifecycle.ts";
+import {
+  APP_PID_FILE,
+  ENV_FILE,
+  PID_DIR,
+  TUNNEL_PID_FILE,
+} from "./lib/paths.ts";
 
 function main(): void {
-  const stopped = stopOne("9router", APP_PID_FILE);
+  const fileEnv = loadEnvFile(ENV_FILE);
+  applyEnvFile(ENV_FILE);
+  const port = fileEnv.PORT?.trim() || process.env.PORT?.trim() || "20128";
+
+  let stopped = false;
+  if (stopDaemon(TUNNEL_PID_FILE, "tunnel")) stopped = true;
+  if (stopDaemon(APP_PID_FILE, "9router")) stopped = true;
+  if (stopPortOccupants(port)) stopped = true;
 
   if (!stopped) {
-    console.log(`nothing to stop (no pid files under ${PID_DIR})`);
-    console.log("If npm run up is in the foreground, use Ctrl-C instead.");
+    console.log(
+      `nothing to stop (no daemons under ${PID_DIR}, port :${port} free)`,
+    );
+  } else {
+    console.log("down complete");
   }
 }
 

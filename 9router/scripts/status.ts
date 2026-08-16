@@ -1,22 +1,39 @@
-import { existsSync, readFileSync } from "node:fs";
-import { APP_PID_FILE } from "./lib/paths.ts";
-
-function statusOne(label: string, file: string): void {
-  if (!existsSync(file)) {
-    console.log(`${label}: not running`);
-    return;
-  }
-  const pid = Number(readFileSync(file, "utf8").trim());
-  try {
-    if (pid > 0) process.kill(pid, 0);
-    console.log(`${label}: running (pid ${pid})`);
-  } catch {
-    console.log(`${label}: not running`);
-  }
-}
+import { applyEnvFile, loadEnvFile } from "./lib/env.ts";
+import { livePidFromFile, pidsOnPort } from "./lib/lifecycle.ts";
+import {
+  APP_LOG_FILE,
+  APP_PID_FILE,
+  CURSOR_PUBLIC_BASE_URL,
+  ENV_FILE,
+  TUNNEL_LOG_FILE,
+  TUNNEL_PID_FILE,
+} from "./lib/paths.ts";
 
 function main(): void {
-  statusOne("9router", APP_PID_FILE);
+  const fileEnv = loadEnvFile(ENV_FILE);
+  applyEnvFile(ENV_FILE);
+  const port = fileEnv.PORT?.trim() || process.env.PORT?.trim() || "20128";
+
+  const appPid = livePidFromFile(APP_PID_FILE);
+  const tunnelPid = livePidFromFile(TUNNEL_PID_FILE);
+  const listeners = pidsOnPort(port);
+
+  console.log(
+    `9router: ${appPid ? `running (pid ${appPid})` : "not running"}`,
+  );
+  console.log(
+    `tunnel:  ${tunnelPid ? `running (pid ${tunnelPid})` : "not running"}`,
+  );
+  console.log(
+    `port :${port}: ${
+      listeners.length
+        ? `LISTEN (pid ${listeners.join(", ")})`
+        : "free"
+    }`,
+  );
+  console.log(`public:  ${CURSOR_PUBLIC_BASE_URL}`);
+  console.log(`logs:    ${APP_LOG_FILE}`);
+  console.log(`         ${TUNNEL_LOG_FILE}`);
 }
 
 main();
