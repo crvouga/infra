@@ -1,12 +1,16 @@
-import { ENV_FILE, SECRET_KEYS } from "./lib/paths.ts";
-import { ensureEnvFile, upsertEnv } from "./lib/env.ts";
+import { ENV_FILE, SECRET_KEYS } from "../../scripts/lib/paths.ts";
+import { ensureEnvFile, upsertEnv } from "../../scripts/lib/env.ts";
 import {
   allSecretsFromEnv,
   ensureAppSecrets,
-} from "./lib/secrets.ts";
-import { defaultVaultKvConfig, vaultKvCliPath } from "./lib/vault.ts";
+} from "../../scripts/lib/secrets.ts";
+import {
+  defaultVaultKvConfig,
+  vaultKvCliPath,
+} from "../../scripts/lib/vault.ts";
+import type { Command } from "../types.ts";
 
-async function main(): Promise<void> {
+export async function pullSecrets(): Promise<void> {
   const kvPath = vaultKvCliPath(defaultVaultKvConfig());
   ensureEnvFile();
 
@@ -29,7 +33,12 @@ async function main(): Promise<void> {
   console.log(`Done. Secrets written to ${ENV_FILE}`);
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+export const secretsCommands: Command[] = [
+  {
+    id: "pull-secrets",
+    name: "Pull secrets",
+    description: "Write app secrets from Vault (or env) into .env",
+    group: "secrets",
+    run: pullSecrets,
+  },
+];

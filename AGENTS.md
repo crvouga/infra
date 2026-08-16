@@ -60,9 +60,9 @@ If `vault run` fails with `No value found at secret/personal/prd`, KV is empty �
 
 ## Local 9router (`9router/`)
 
-Not on Railway. Local Node/npm only at `http://127.0.0.1:20128`. Cursor BYOK uses the named Cloudflare tunnel **https://9router.chrisvouga.dev** (not fleet `sync-dns`). See [`9router/README.md`](9router/README.md): `cd 9router && npm i && npm run setup && npm run provision-tunnel && npm run up` (`up`/`down` daemonize app + tunnel).
+Not on Railway. Local Node/npm only at `http://127.0.0.1:20128`. Cursor BYOK uses the named Cloudflare tunnel **https://9router.chrisvouga.dev** (not fleet `sync-dns`). See [`9router/README.md`](9router/README.md): `cd 9router && npm i && npm start` (interactive menu for setup, provision-tunnel, start/stop daemons, sync, etc.).
 
-Vault KV at `secret/personal/prd`: `9ROUTER_PASSWORD`, `9ROUTER_JWT_SECRET`, `9ROUTER_API_KEY_SECRET`, `9ROUTER_MACHINE_ID_SALT` (→ `.env` via `npm run pull-secrets` or `vault run -- …`).
+Vault KV at `secret/personal/prd`: `9ROUTER_PASSWORD`, `9ROUTER_JWT_SECRET`, `9ROUTER_API_KEY_SECRET`, `9ROUTER_MACHINE_ID_SALT` (→ `.env` via `npm start` → Pull secrets, or `vault run -- …`).
 
 ## Hard rules
 

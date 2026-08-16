@@ -36,11 +36,10 @@ Fix one of:
   1. Re-login, then retry:
        vault login -method=userpass username=crvouga
        # or: vault login <root-or-dev-token>
-       npm run pull-secrets
+       cd 9router && npm start   # Pull secrets
 
   2. Inject via vault run (same login required):
-       vault run -- npm run pull-secrets
-       vault run -- npm run sync-cursor
+       vault run -- npm start   # then choose the command from the menu
 
   3. Create a scoped read token (needs an admin/root session first):
        cd ${REPO_ROOT}/vault && ./scripts/create-dev-token.sh

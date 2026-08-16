@@ -1,6 +1,5 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { APP_DIR } from "./lib/paths.ts";
 
 const CLAUDE_REDIRECT = "https://console.anthropic.com/oauth/code/callback";
@@ -53,9 +52,4 @@ function walk(d: string): void {
 export function patchOAuthRedirect(rootDir?: string): void {
   const target = rootDir ? resolve(rootDir) : resolve(APP_DIR, ".next");
   walk(target);
-}
-
-const entry = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : "";
-if (import.meta.url === entry) {
-  patchOAuthRedirect(process.argv[2] ?? resolve(APP_DIR, ".next"));
 }

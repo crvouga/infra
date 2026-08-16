@@ -1,14 +1,15 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureCloudflared, resolveCloudflaredBin } from "./lib/cloudflared.ts";
-import { applyEnvFile, loadEnvFile } from "./lib/env.ts";
+import { ensureCloudflared, resolveCloudflaredBin } from "../../scripts/lib/cloudflared.ts";
+import { applyEnvFile, loadEnvFile } from "../../scripts/lib/env.ts";
 import {
   livePidFromFile,
   pidsOnPort,
   spawnDaemon,
   stopDaemon,
+  stopPortOccupants,
   waitForHealth,
-} from "./lib/lifecycle.ts";
+} from "../../scripts/lib/lifecycle.ts";
 import {
   APP_DIR,
   APP_LOG_FILE,
@@ -24,9 +25,10 @@ import {
   TUNNEL_LOG_FILE,
   TUNNEL_PID_FILE,
   dataDirFromEnvFile,
-} from "./lib/paths.ts";
-import { ensureAppSecrets } from "./lib/secrets.ts";
-import { requireCmd } from "./lib/spawn.ts";
+} from "../../scripts/lib/paths.ts";
+import { ensureAppSecrets } from "../../scripts/lib/secrets.ts";
+import { requireCmd } from "../../scripts/lib/spawn.ts";
+import { CommandError, type Command } from "../types.ts";
 
 function printAlreadyRunning(port: string): void {
   const appPid = livePidFromFile(APP_PID_FILE);
@@ -40,10 +42,10 @@ function printAlreadyRunning(port: string): void {
   );
   console.log(`  logs:    ${APP_LOG_FILE}`);
   console.log(`           ${TUNNEL_LOG_FILE}`);
-  console.log("  npm run status | npm run down");
+  console.log("  Use Status or Stop daemons from the menu.");
 }
 
-async function main(): Promise<void> {
+export async function startDaemons(): Promise<void> {
   requireCmd("node");
 
   if (!existsSync(ENV_FILE)) {
@@ -52,30 +54,26 @@ async function main(): Promise<void> {
   }
 
   if (!existsSync(ENV_FILE)) {
-    console.error(`ERROR: missing ${ENV_FILE}. Run: npm run pull-secrets`);
-    process.exit(1);
+    throw new CommandError(`Missing ${ENV_FILE}. Run Pull secrets first.`);
   }
   if (!existsSync(join(APP_DIR, "package.json"))) {
-    console.error(
-      "ERROR: app not cloned. Run: npm run sync-app && npm run install-app && npm run build",
+    throw new CommandError(
+      "App not cloned. Run Full setup (or Sync app → Install → Build).",
     );
-    process.exit(1);
   }
   if (!existsSync(join(APP_DIR, ".next", "BUILD_ID"))) {
-    console.error(
-      "ERROR: app not built (missing .next/BUILD_ID). Run: npm run build",
+    throw new CommandError(
+      "App not built (missing .next/BUILD_ID). Run Build app first.",
     );
-    process.exit(1);
   }
   if (!existsSync(CLOUDFLARED_CONFIG)) {
-    console.error(
+    throw new CommandError(
       [
-        `ERROR: missing ${CLOUDFLARED_CONFIG}`,
-        "Run once: npm run provision-tunnel",
+        `Missing ${CLOUDFLARED_CONFIG}`,
+        "Run Provision tunnel once first.",
         "(requires: brew install cloudflared && cloudflared tunnel login)",
       ].join("\n"),
     );
-    process.exit(1);
   }
 
   ensureCloudflared();
@@ -107,8 +105,7 @@ async function main(): Promise<void> {
 
   for (const key of SECRET_KEYS) {
     if (!process.env[key]?.trim()) {
-      console.error(`ERROR: ${key} is empty in .env. Run: npm run pull-secrets`);
-      process.exit(1);
+      throw new CommandError(`${key} is empty in .env. Run Pull secrets.`);
     }
   }
 
@@ -119,7 +116,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Partial state: tear down our daemons before starting clean
   if (appAlive || tunnelAlive) {
     console.log("Partial daemon state — restarting…");
     stopDaemon(TUNNEL_PID_FILE, "tunnel");
@@ -128,13 +124,12 @@ async function main(): Promise<void> {
 
   const portPids = pidsOnPort(port);
   if (portPids.length > 0) {
-    console.error(
+    throw new CommandError(
       [
-        `ERROR: port ${port} is already in use (pid ${portPids.join(", ")})`,
-        "Run: npm run down",
+        `Port ${port} is already in use (pid ${portPids.join(", ")})`,
+        "Run Stop daemons first.",
       ].join("\n"),
     );
-    process.exit(1);
   }
 
   const env: NodeJS.ProcessEnv = {
@@ -168,7 +163,7 @@ async function main(): Promise<void> {
     console.error(err instanceof Error ? err.message : err);
     console.error(`See log: ${APP_LOG_FILE}`);
     stopDaemon(APP_PID_FILE, "9router");
-    process.exit(1);
+    throw new CommandError("9router failed health check.");
   }
   console.log("    health OK");
 
@@ -184,24 +179,104 @@ async function main(): Promise<void> {
   });
   console.log(`    pid ${tunnelPid}  log ${TUNNEL_LOG_FILE}`);
 
-  // Brief settle — cloudflared should stay alive
   await new Promise((r) => setTimeout(r, 800));
   if (!livePidFromFile(TUNNEL_PID_FILE)) {
-    console.error("ERROR: tunnel exited immediately");
     console.error(`See log: ${TUNNEL_LOG_FILE}`);
     stopDaemon(APP_PID_FILE, "9router");
-    process.exit(1);
+    throw new CommandError("Tunnel exited immediately.");
   }
 
   console.log("");
-  console.log("OK — daemons running (CLI exiting).");
+  console.log("OK — daemons running.");
   console.log(`  local:  http://127.0.0.1:${port}`);
   console.log(`  public: ${CURSOR_PUBLIC_BASE_URL}`);
   console.log(`  Cursor: ${CURSOR_PUBLIC_BASE_URL}/v1`);
-  console.log("  npm run status | npm run down | npm run sync-cursor");
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+export async function stopDaemons(): Promise<void> {
+  const fileEnv = loadEnvFile(ENV_FILE);
+  applyEnvFile(ENV_FILE);
+  const port = fileEnv.PORT?.trim() || process.env.PORT?.trim() || "20128";
+
+  let stopped = false;
+  if (stopDaemon(TUNNEL_PID_FILE, "tunnel")) stopped = true;
+  if (stopDaemon(APP_PID_FILE, "9router")) stopped = true;
+  if (stopPortOccupants(port)) stopped = true;
+
+  if (!stopped) {
+    console.log(
+      `nothing to stop (no daemons under ${PID_DIR}, port :${port} free)`,
+    );
+  } else {
+    console.log("down complete");
+  }
+}
+
+function tunnelLocalService(): string | null {
+  if (!existsSync(CLOUDFLARED_CONFIG)) return null;
+  const text = readFileSync(CLOUDFLARED_CONFIG, "utf8");
+  const match = text.match(/^\s*service:\s*(https?:\/\/\S+)/m);
+  return match?.[1]?.replace(/\/$/, "") ?? null;
+}
+
+function resolveLocalBase(fileEnv: Record<string, string>): string {
+  return (
+    tunnelLocalService() ||
+    fileEnv.BASE_URL?.trim() ||
+    fileEnv.NEXT_PUBLIC_BASE_URL?.trim() ||
+    process.env.BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_BASE_URL?.trim() ||
+    LOCAL_BASE_URL
+  ).replace(/\/$/, "");
+}
+
+export async function showStatus(): Promise<void> {
+  const fileEnv = loadEnvFile(ENV_FILE);
+  applyEnvFile(ENV_FILE);
+  const port = fileEnv.PORT?.trim() || process.env.PORT?.trim() || "20128";
+  const local = resolveLocalBase(fileEnv);
+
+  const appPid = livePidFromFile(APP_PID_FILE);
+  const tunnelPid = livePidFromFile(TUNNEL_PID_FILE);
+  const listeners = pidsOnPort(port);
+
+  console.log(
+    `9router: ${appPid ? `running (pid ${appPid})` : "not running"}`,
+  );
+  console.log(
+    `tunnel:  ${tunnelPid ? `running (pid ${tunnelPid})` : "not running"}`,
+  );
+  console.log(
+    `port :${port}: ${
+      listeners.length ? `LISTEN (pid ${listeners.join(", ")})` : "free"
+    }`,
+  );
+  console.log(`local:   ${local}`);
+  console.log(`public:  ${CURSOR_PUBLIC_BASE_URL}`);
+  console.log(`logs:    ${APP_LOG_FILE}`);
+  console.log(`         ${TUNNEL_LOG_FILE}`);
+}
+
+export const lifecycleCommands: Command[] = [
+  {
+    id: "start",
+    name: "Start daemons",
+    description: "Daemonize 9Router and the Cloudflare named tunnel",
+    group: "lifecycle",
+    run: startDaemons,
+  },
+  {
+    id: "stop",
+    name: "Stop daemons",
+    description: "Stop app and tunnel daemons; free the app port",
+    group: "lifecycle",
+    run: stopDaemons,
+  },
+  {
+    id: "status",
+    name: "Status",
+    description: "Show pids, port listeners, local/public URLs, and log paths",
+    group: "lifecycle",
+    run: showStatus,
+  },
+];

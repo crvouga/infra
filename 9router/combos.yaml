@@ -1,5 +1,5 @@
 # Declarative LLM combo catalog for local 9Router.
-# Sync: npm run sync-combos   Check: npm run check-combos
+# Sync / check via: npm start → Sync combos / Check combos
 # Cursor model picker ids use the 9router- prefix.
 version: 1
 defaults:

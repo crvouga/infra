@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createAuthedClient } from "./lib/client.ts";
-import { loadCombosSpec } from "./lib/combos.ts";
+import { createAuthedClient } from "../../scripts/lib/client.ts";
+import { loadCombosSpec } from "../../scripts/lib/combos.ts";
 import {
   assertCursorQuitOrForce,
   backupCursorSyncState,
@@ -18,8 +18,10 @@ import {
   readApplicationUser,
   writeApplicationUser,
   writeOpenAIKeySecret,
-} from "./lib/cursor.ts";
-import { CURSOR_PUBLIC_BASE_URL, ROOT } from "./lib/paths.ts";
+} from "../../scripts/lib/cursor.ts";
+import { CURSOR_PUBLIC_BASE_URL, ROOT } from "../../scripts/lib/paths.ts";
+import { askConfirm, askInput, askSelect } from "../prompt.ts";
+import { CommandError, type Command } from "../types.ts";
 
 type ApiKeyRow = {
   id: string;
@@ -34,77 +36,12 @@ function logStep(msg: string): void {
   console.log(`[sync-cursor] ${msg}`);
 }
 
-function parseArgs(argv: string[]): {
-  dryRun: boolean;
-  force: boolean;
-  pruneCombos: boolean;
-  allowPrivate: boolean;
-  baseUrl?: string;
-} {
-  let dryRun = false;
-  let force = false;
-  let pruneCombos = false;
-  let allowPrivate = false;
-  let baseUrl: string | undefined;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]!;
-    if (arg === "--dry-run") dryRun = true;
-    else if (arg === "--force") force = true;
-    else if (arg === "--prune-combos") pruneCombos = true;
-    else if (arg === "--allow-private") allowPrivate = true;
-    else if (arg === "--base-url") {
-      const next = argv[++i];
-      if (!next || next.startsWith("-")) {
-        console.error("--base-url requires a URL argument");
-        process.exit(1);
-      }
-      baseUrl = next;
-    } else if (arg.startsWith("--base-url=")) {
-      baseUrl = arg.slice("--base-url=".length);
-      if (!baseUrl) {
-        console.error("--base-url requires a URL argument");
-        process.exit(1);
-      }
-    } else if (arg === "--help" || arg === "-h") {
-      console.log(`Usage: npm run sync-cursor [-- --dry-run] [-- --force] [-- --prune-combos]
-                   [-- --base-url <https://…>] [-- --allow-private]
-
-Write 9Router OpenAI base URL, API key, and combos.yaml model names into Cursor state.vscdb.
-
-Default OpenAI base URL: ${CURSOR_PUBLIC_BASE_URL}
-
-  --dry-run         Show planned changes; do not write
-  --force           Write even if Cursor has the DB open (may be overwritten)
-  --prune-combos    Remove previously synced combo names no longer in combos.yaml
-  --base-url URL    Override public HTTPS OpenAI base (default: ${CURSOR_PUBLIC_BASE_URL})
-  --allow-private   Allow writing localhost / private IPs (Cursor Agent will 403 SSRF)
-
-Cursor's cloud backend cannot reach private networks. Run \`npm run provision-tunnel\`
-once, then \`npm run up\` (daemonizes app + tunnel) while using Cursor.
-
-Quit Cursor before running (recommended).
-`);
-      process.exit(0);
-    } else {
-      console.error(`Unknown flag: ${arg}`);
-      process.exit(1);
-    }
-  }
-  return { dryRun, force, pruneCombos, allowPrivate, baseUrl };
-}
-
-/**
- * Resolve OpenAI base for Cursor BYOK (first wins):
- * 1. --base-url
- * 2. CURSOR_OPENAI_BASE_URL
- * 3. https://9router.chrisvouga.dev (stable named tunnel)
- */
 function resolveCursorOpenAIBaseUrl(cliBaseUrl?: string): {
   raw: string;
   source: string;
 } {
   if (cliBaseUrl?.trim()) {
-    return { raw: cliBaseUrl.trim(), source: "--base-url" };
+    return { raw: cliBaseUrl.trim(), source: "prompt" };
   }
   const fromEnv = process.env.CURSOR_OPENAI_BASE_URL?.trim();
   if (fromEnv) {
@@ -128,7 +65,7 @@ function assertPublicOrAllowed(
     );
     return;
   }
-  throw new Error(
+  throw new CommandError(
     [
       `Refusing to sync private OpenAI base URL: ${openAIBaseUrl}`,
       `(source: ${source})`,
@@ -136,11 +73,11 @@ function assertPublicOrAllowed(
       "Cursor's cloud backend blocks loopback/RFC1918 addresses (SSRF protection).",
       "Use the stable public hostname:",
       "",
-      "  npm run provision-tunnel   # once",
-      "  npm run up                 # daemon: app + tunnel → 9router.chrisvouga.dev",
-      "  npm run sync-cursor        # writes https://9router.chrisvouga.dev/v1",
+      "  Provision tunnel (once)",
+      "  Start daemons (app + tunnel → 9router.chrisvouga.dev)",
+      "  Sync Cursor (writes https://9router.chrisvouga.dev/v1)",
       "",
-      "Pass --allow-private only if you intentionally want localhost (will not work in Agent).",
+      "Allow private base URL only if you intentionally want localhost (will not work in Agent).",
     ].join("\n"),
   );
 }
@@ -183,15 +120,82 @@ async function ensureCursorApiKey(
     body: JSON.stringify({ name: keyName }),
   });
   if (!created?.key) {
-    throw new Error(`Failed to create 9Router API key named "${keyName}"`);
+    throw new CommandError(
+      `Failed to create 9Router API key named "${keyName}"`,
+    );
   }
   return { key: created.key, created: true };
 }
 
-async function main(): Promise<void> {
-  const { dryRun, force, pruneCombos, allowPrivate, baseUrl } = parseArgs(
-    process.argv.slice(2),
+export async function syncCursor(): Promise<void> {
+  const dryRun = await askConfirm(
+    "Dry run only?",
+    "Show planned Cursor changes without writing state.vscdb.",
+    false,
   );
+  const force = await askConfirm(
+    "Force write while Cursor may be open?",
+    "Write even if Cursor holds the DB open (changes may be overwritten).",
+    false,
+  );
+  const pruneCombos = await askConfirm(
+    "Prune removed combo names?",
+    "Drop previously synced combo model names that are no longer in combos.yaml.",
+    false,
+  );
+
+  const baseChoice = await askSelect<"default" | "env" | "custom">({
+    message: "OpenAI base URL",
+    description:
+      "Cursor Agent calls this URL from the cloud — use the public tunnel hostname.",
+    choices: [
+      {
+        name: `Public tunnel (${CURSOR_PUBLIC_BASE_URL})`,
+        value: "default",
+        description: "Recommended for Cursor BYOK",
+      },
+      {
+        name: "CURSOR_OPENAI_BASE_URL from environment",
+        value: "env",
+        description: process.env.CURSOR_OPENAI_BASE_URL?.trim()
+          ? `Currently: ${process.env.CURSOR_OPENAI_BASE_URL.trim()}`
+          : "Not set — falls back to public tunnel",
+      },
+      {
+        name: "Custom URL",
+        value: "custom",
+        description: "Enter a full https:// base URL",
+      },
+    ],
+    default: "default",
+  });
+
+  let baseUrl: string | undefined;
+  if (baseChoice === "custom") {
+    baseUrl = await askInput({
+      message: "Custom OpenAI base URL",
+      description: "Usually https://9router.chrisvouga.dev (no /v1 suffix needed).",
+      default: CURSOR_PUBLIC_BASE_URL,
+      validate: (v) => {
+        try {
+          const u = new URL(v.trim());
+          if (!u.protocol.startsWith("http")) return "Must be http(s)";
+          return true;
+        } catch {
+          return "Enter a valid URL";
+        }
+      },
+    });
+  } else if (baseChoice === "env") {
+    baseUrl = process.env.CURSOR_OPENAI_BASE_URL?.trim() || undefined;
+  }
+
+  const allowPrivate = await askConfirm(
+    "Allow private / localhost base URL?",
+    "Cursor Agent will 403 private networks. Only enable for local debugging.",
+    false,
+  );
+
   const dbPath = defaultCursorStateDb();
   const keyName =
     process.env.NINEROUTER_CURSOR_KEY_NAME?.trim() || "cursor";
@@ -208,7 +212,13 @@ async function main(): Promise<void> {
 
   logStep("Checking Cursor DB lock via lsof…");
   if (!dryRun) {
-    assertCursorQuitOrForce(force, dbPath);
+    try {
+      assertCursorQuitOrForce(force, dbPath);
+    } catch (err) {
+      throw new CommandError(
+        err instanceof Error ? err.message : String(err),
+      );
+    }
     logStep("Cursor DB not locked by another process");
   } else if (isCursorHoldingDb(dbPath)) {
     console.warn(
@@ -314,12 +324,18 @@ async function main(): Promise<void> {
       keyWritten
         ? "Reopen Cursor (or Reload Window), then pick a combo model (e.g. 9router-free, 9router-max-sub-claude)."
         : "Reopen Cursor, paste the API key above if prompted, then pick a combo model.",
-      `Keep daemons up (\`npm run up\`) so ${CURSOR_PUBLIC_BASE_URL} reaches local 9Router.`,
+      `Keep daemons up (Start daemons) so ${CURSOR_PUBLIC_BASE_URL} reaches local 9Router.`,
     ].join("\n"),
   );
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+export const cursorCommands: Command[] = [
+  {
+    id: "sync-cursor",
+    name: "Sync Cursor",
+    description:
+      "Write BYOK base URL, API key, and combo models into Cursor state.vscdb",
+    group: "cursor",
+    run: syncCursor,
+  },
+];

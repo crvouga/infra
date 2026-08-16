@@ -99,7 +99,7 @@ export function ensureCloudflaredCert(): void {
       `Missing Cloudflare tunnel cert: ${CLOUDFLARED_CERT}`,
       "Run once (opens browser):",
       "  cloudflared tunnel login",
-      "Then re-run: npm run provision-tunnel",
+      "Then re-run: npm start → Provision tunnel",
     ].join("\n"),
   );
   process.exit(1);

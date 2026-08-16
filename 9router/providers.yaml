@@ -1,5 +1,5 @@
 # Declarative provider connection catalog for local 9Router.
-# Sync: npm run sync-providers
+# Sync via: npm start → Sync providers
 #
 # Entries here override auto-discovery from app/open-sse/providers/registry.
 # Unlisted apikey / freeTier providers default to method: apikey with vault key
