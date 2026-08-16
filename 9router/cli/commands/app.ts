@@ -43,7 +43,7 @@ export async function syncApp(): Promise<void> {
 export async function installApp(): Promise<void> {
   requireCmd("npm");
   if (!existsSync(join(APP_DIR, "package.json"))) {
-    throw new CommandError("App not cloned. Run Sync app first.");
+    throw new CommandError("App not cloned. Run App: Sync first.");
   }
   console.log(`==> npm install in ${APP_DIR}`);
   runInherit("npm", ["install"], { cwd: APP_DIR });
@@ -54,7 +54,7 @@ export async function buildApp(): Promise<void> {
   requireCmd("npm");
   requireCmd("node");
   if (!existsSync(join(APP_DIR, "package.json"))) {
-    throw new CommandError("App not cloned. Run Sync app first.");
+    throw new CommandError("App not cloned. Run App: Sync first.");
   }
   console.log(`==> npm run build in ${APP_DIR}`);
   runInherit("npm", ["run", "build"], { cwd: APP_DIR });
@@ -67,23 +67,20 @@ export async function buildApp(): Promise<void> {
 export const appCommands: Command[] = [
   {
     id: "sync-app",
-    name: "Sync app",
+    name: "App: Sync",
     description: "Clone or update upstream 9Router into app/",
-    group: "app",
     run: syncApp,
   },
   {
     id: "install-app",
-    name: "Install app deps",
+    name: "App: Install deps",
     description: "Run npm install in the app/ clone",
-    group: "app",
     run: installApp,
   },
   {
     id: "build",
-    name: "Build app",
+    name: "App: Build",
     description: "Build the app and apply the OAuth redirect patch",
-    group: "app",
     run: buildApp,
   },
 ];

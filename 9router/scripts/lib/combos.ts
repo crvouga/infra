@@ -8,6 +8,9 @@ export const COMBOS_SPEC_PATH = join(ROOT, "combos.yaml");
 
 export type ComboStrategyName = "fallback" | "round-robin" | "fusion";
 
+export type ComboRole = "free" | "cheap" | "subscription";
+
+/** Concrete combo after materialize — what the 9Router API stores. */
 export type SpecCombo = {
   name: string;
   description?: string;
@@ -16,6 +19,40 @@ export type SpecCombo = {
   strategy?: ComboStrategyName;
 };
 
+export type ComboTier = {
+  /** Semantic provider bucket */
+  role?: ComboRole;
+  /** Explicit provider ids (use-case coupled to a provider) */
+  providers?: string[];
+  /** Max models to take across this tier's providers */
+  pick?: number;
+};
+
+/** Semantic combo template from combos.yaml (no hardcoded models). */
+export type TemplateCombo = {
+  name: string;
+  description?: string;
+  tiers: ComboTier[];
+  kind?: string | null;
+  strategy?: ComboStrategyName;
+};
+
+export type CombosTemplateSpec = {
+  version: number;
+  defaults: {
+    strategy: ComboStrategyName;
+    kind: string;
+    pick_per_provider: number;
+  };
+  roles: {
+    cheap?: string[];
+    free?: string[];
+    subscription?: string[];
+  };
+  combos: TemplateCombo[];
+};
+
+/** Materialized spec with concrete models — used by sync/diff/API. */
 export type CombosSpec = {
   version: number;
   defaults: {
@@ -56,14 +93,38 @@ const VALID_STRATEGIES = new Set<ComboStrategyName>([
   "round-robin",
   "fusion",
 ]);
+const VALID_ROLES = new Set<ComboRole>(["free", "cheap", "subscription"]);
 
 function modelsEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((m, i) => m === b[i]);
 }
 
-export function loadCombosSpec(path = COMBOS_SPEC_PATH): CombosSpec {
-  const raw = parseYaml(readFileSync(path, "utf8")) as CombosSpec;
+type RawYaml = {
+  version?: number;
+  defaults?: {
+    strategy?: string;
+    kind?: string;
+    pick_per_provider?: number;
+  };
+  roles?: {
+    cheap?: string[];
+    free?: string[];
+    subscription?: string[];
+  };
+  combos?: Array<{
+    name?: string;
+    description?: string;
+    models?: string[];
+    tiers?: ComboTier[];
+    kind?: string;
+    strategy?: string;
+  }>;
+};
+
+/** Load semantic combos.yaml (v2). Rejects hardcoded models lists. */
+export function loadCombosSpec(path = COMBOS_SPEC_PATH): CombosTemplateSpec {
+  const raw = parseYaml(readFileSync(path, "utf8")) as RawYaml;
   if (!raw || typeof raw !== "object") {
     throw new Error(`Invalid combos spec at ${path}`);
   }
@@ -71,16 +132,32 @@ export function loadCombosSpec(path = COMBOS_SPEC_PATH): CombosSpec {
     throw new Error(`combos.yaml must have a combos: array`);
   }
 
+  const version = Number(raw.version) || 0;
+  if (version < 2) {
+    throw new Error(
+      `combos.yaml must be version: 2 (semantic tiers). Found version ${version || 1}.`,
+    );
+  }
+
   const defaults = {
     strategy: (raw.defaults?.strategy ?? "fallback") as ComboStrategyName,
     kind: raw.defaults?.kind ?? "llm",
+    pick_per_provider: Math.max(1, Number(raw.defaults?.pick_per_provider) || 2),
   };
   if (!VALID_STRATEGIES.has(defaults.strategy)) {
     throw new Error(`Invalid defaults.strategy: ${defaults.strategy}`);
   }
 
+  const roles = {
+    cheap: Array.isArray(raw.roles?.cheap) ? [...raw.roles!.cheap!] : undefined,
+    free: Array.isArray(raw.roles?.free) ? [...raw.roles!.free!] : undefined,
+    subscription: Array.isArray(raw.roles?.subscription)
+      ? [...raw.roles!.subscription!]
+      : undefined,
+  };
+
   const seen = new Set<string>();
-  const combos: SpecCombo[] = [];
+  const combos: TemplateCombo[] = [];
   for (const c of raw.combos) {
     if (!c?.name || typeof c.name !== "string") {
       throw new Error("Each combo needs a string name");
@@ -94,16 +171,45 @@ export function loadCombosSpec(path = COMBOS_SPEC_PATH): CombosSpec {
       throw new Error(`Duplicate combo name: ${c.name}`);
     }
     seen.add(c.name);
-    if (!Array.isArray(c.models) || c.models.length === 0) {
-      throw new Error(`Combo "${c.name}" needs a non-empty models list`);
+
+    if (Array.isArray(c.models) && c.models.length > 0) {
+      throw new Error(
+        `Combo "${c.name}" must not hardcode models: — use tiers: with role/providers instead`,
+      );
     }
-    for (const m of c.models) {
-      if (typeof m !== "string" || !m.includes("/")) {
+    if (!Array.isArray(c.tiers) || c.tiers.length === 0) {
+      throw new Error(`Combo "${c.name}" needs a non-empty tiers list`);
+    }
+
+    const tiers: ComboTier[] = [];
+    for (const t of c.tiers) {
+      if (!t || typeof t !== "object") {
+        throw new Error(`Combo "${c.name}" has an invalid tier`);
+      }
+      if (t.role && !VALID_ROLES.has(t.role)) {
         throw new Error(
-          `Combo "${c.name}" has invalid model "${m}" (expected provider/model)`,
+          `Combo "${c.name}" has invalid role "${t.role}" (use free|cheap|subscription)`,
         );
       }
+      if (!t.role && (!t.providers || t.providers.length === 0)) {
+        throw new Error(
+          `Combo "${c.name}" tier needs role: or providers:`,
+        );
+      }
+      if (t.providers) {
+        for (const p of t.providers) {
+          if (typeof p !== "string" || !p.trim()) {
+            throw new Error(`Combo "${c.name}" has invalid provider id in tiers`);
+          }
+        }
+      }
+      tiers.push({
+        role: t.role,
+        providers: t.providers ? [...t.providers] : undefined,
+        pick: t.pick !== undefined ? Math.max(1, Number(t.pick)) : undefined,
+      });
     }
+
     const strategy = (c.strategy ?? defaults.strategy) as ComboStrategyName;
     if (!VALID_STRATEGIES.has(strategy)) {
       throw new Error(`Combo "${c.name}" has invalid strategy: ${strategy}`);
@@ -111,22 +217,23 @@ export function loadCombosSpec(path = COMBOS_SPEC_PATH): CombosSpec {
     combos.push({
       name: c.name,
       description: c.description,
-      models: [...c.models],
+      tiers,
       kind: c.kind ?? defaults.kind,
       strategy,
     });
   }
 
   return {
-    version: Number(raw.version) || 1,
+    version,
     defaults,
+    roles,
     combos,
   };
 }
 
 export function desiredStrategy(
-  combo: SpecCombo,
-  defaults: CombosSpec["defaults"],
+  combo: SpecCombo | TemplateCombo,
+  defaults: { strategy: ComboStrategyName },
 ): ComboStrategyName {
   return combo.strategy ?? defaults.strategy;
 }
@@ -152,7 +259,6 @@ export function diffCombos(
         `models: [${(r.models ?? []).join(", ")}] → [${desired.models.join(", ")}]`,
       );
     }
-    // null kind is treated as llm (dashboard default)
     const normalizeKind = (k: string | null | undefined) =>
       !k || k === "llm" ? "llm" : k;
     const wantKind = normalizeKind(desired.kind);

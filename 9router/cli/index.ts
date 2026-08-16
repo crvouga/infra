@@ -1,6 +1,13 @@
 import { allCommands } from "./commands/index.ts";
 import { pushHistory } from "./history.ts";
 import { searchableMenu } from "./menu.ts";
+import {
+  banner,
+  cancelled,
+  fail,
+  goodbye,
+  section,
+} from "./theme.ts";
 import { CommandError, type Command } from "./types.ts";
 
 function isExitPromptError(err: unknown): boolean {
@@ -13,8 +20,7 @@ function isExitPromptError(err: unknown): boolean {
 }
 
 async function main(): Promise<void> {
-  console.log("9router interactive CLI");
-  console.log("Type to search · ↑↓ to navigate · Enter to run · Ctrl+C to quit\n");
+  banner();
 
   for (; ;) {
     let selected: Command | null = null;
@@ -22,34 +28,32 @@ async function main(): Promise<void> {
       selected = await searchableMenu(allCommands);
     } catch (err) {
       if (isExitPromptError(err)) {
-        console.log("\nBye.");
+        console.log("");
+        goodbye();
         process.exit(0);
       }
       throw err;
     }
 
     if (!selected || selected.id === "exit") {
-      console.log("Bye.");
+      goodbye();
       process.exit(0);
       return;
     }
 
     const cmd = selected;
     pushHistory(cmd.id);
-    console.log(`\n▶ ${cmd.name}`);
-    console.log(`  ${cmd.description}\n`);
+    section(cmd.name, cmd.description);
 
     try {
       await cmd.run();
     } catch (err) {
       if (isExitPromptError(err)) {
-        console.log("\nCancelled.");
+        cancelled();
       } else if (err instanceof CommandError) {
-        console.error(`\nERROR: ${err.message}`);
+        fail(err.message);
       } else {
-        console.error(
-          `\nERROR: ${err instanceof Error ? err.message : err}`,
-        );
+        fail(err instanceof Error ? err.message : String(err));
       }
     }
 
@@ -59,9 +63,10 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   if (isExitPromptError(err)) {
-    console.log("\nBye.");
+    console.log("");
+    goodbye();
     process.exit(0);
   }
-  console.error(err instanceof Error ? err.message : err);
+  fail(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

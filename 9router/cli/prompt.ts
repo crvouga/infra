@@ -1,16 +1,18 @@
 import { confirm, input, password, select, Separator } from "@inquirer/prompts";
+import { cliTheme, promptMessage } from "./theme.ts";
 
 export { Separator };
 
-/** Confirm with a name and short description folded into the prompt. */
+/** Confirm with a name and short description. */
 export async function askConfirm(
   name: string,
   description: string,
   defaultValue = false,
 ): Promise<boolean> {
   return confirm({
-    message: `${name}\n  ${description}`,
+    message: promptMessage(name, description),
     default: defaultValue,
+    theme: cliTheme,
   });
 }
 
@@ -21,11 +23,10 @@ export async function askSelect<T extends string>(opts: {
   default?: T;
 }): Promise<T> {
   return select({
-    message: opts.description
-      ? `${opts.message}\n  ${opts.description}`
-      : opts.message,
+    message: promptMessage(opts.message, opts.description),
     choices: opts.choices,
     default: opts.default,
+    theme: cliTheme,
   });
 }
 
@@ -36,11 +37,10 @@ export async function askInput(opts: {
   validate?: (value: string) => boolean | string | Promise<boolean | string>;
 }): Promise<string> {
   return input({
-    message: opts.description
-      ? `${opts.message}\n  ${opts.description}`
-      : opts.message,
+    message: promptMessage(opts.message, opts.description),
     default: opts.default,
     validate: opts.validate,
+    theme: cliTheme,
   });
 }
 
@@ -49,9 +49,8 @@ export async function askPassword(opts: {
   description?: string;
 }): Promise<string> {
   return password({
-    message: opts.description
-      ? `${opts.message}\n  ${opts.description}`
-      : opts.message,
+    message: promptMessage(opts.message, opts.description),
     mask: "*",
+    theme: cliTheme,
   });
 }

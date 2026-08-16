@@ -23,15 +23,14 @@ export async function fullSetup(): Promise<void> {
   console.log("\n── Build app ──");
   await buildApp();
   console.log("\nOK — full setup complete.");
-  console.log("Next: Provision tunnel, then Start daemons.");
+  console.log("Next: Tunnel: Provision, then Daemons: Start.");
 }
 
 export const setupCommands: Command[] = [
   {
     id: "setup",
-    name: "Full setup",
+    name: "Setup: Full",
     description: "Pull secrets, sync app, install deps, and build",
-    group: "setup",
     run: fullSetup,
   },
 ];

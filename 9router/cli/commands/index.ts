@@ -12,7 +12,6 @@ export const exitCommand: Command = {
   id: "exit",
   name: "Exit",
   description: "Quit the 9router CLI",
-  group: "meta",
   run: async () => {
     /* handled by main loop */
   },

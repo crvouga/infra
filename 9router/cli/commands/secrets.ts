@@ -36,9 +36,8 @@ export async function pullSecrets(): Promise<void> {
 export const secretsCommands: Command[] = [
   {
     id: "pull-secrets",
-    name: "Pull secrets",
+    name: "Secrets: Pull",
     description: "Write app secrets from Vault (or env) into .env",
-    group: "secrets",
     run: pullSecrets,
   },
 ];

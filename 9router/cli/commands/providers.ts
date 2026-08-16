@@ -20,11 +20,11 @@ import {
   type SyncResult,
 } from "../../scripts/lib/providers.ts";
 import {
-  activeProviderIds,
+  providersReferencedByTemplate,
   fetchProviderConnections,
   loadProviderIndex,
   missingCredentialProviders,
-  providersReferencedBySpec,
+  activeProviderIds,
 } from "../../scripts/lib/registry.ts";
 import {
   defaultVaultKvConfig,
@@ -155,7 +155,7 @@ export async function syncProviders(): Promise<void> {
   if (strict) {
     const index = await loadProviderIndex();
     const comboSpec = loadCombosSpec();
-    const needed = providersReferencedBySpec(comboSpec, index);
+    const needed = providersReferencedByTemplate(comboSpec, index);
     const fresh = dryRun
       ? connections
       : await fetchProviderConnections(client);
@@ -225,7 +225,7 @@ export async function setupProviderCreds(): Promise<void> {
   const catalog = await resolveProviderCatalog(spec);
   const meta = await loadRegistryMeta();
   const index = await loadProviderIndex();
-  const comboIds = providersReferencedBySpec(loadCombosSpec(), index);
+  const comboIds = providersReferencedByTemplate(loadCombosSpec(), index);
   const queue = buildCredWalkQueue(catalog, comboIds, { comboOnly });
 
   const { creds, vaultPath, vaultOk, vaultError } = await loadCredentialMap();
@@ -413,9 +413,9 @@ export async function setupProviderCreds(): Promise<void> {
   console.log(
     `    wrote=${wrote}  connected=${connectedN}  skipped=${skipped}${quit ? "  (quit early)" : ""}`,
   );
-  console.log(`\nNext: Sync providers, then Check combos.`);
+  console.log(`\nNext: Providers: Sync, then Combos: Check.`);
   console.log(
-    `OAuth (Claude, Kiro, …): dashboard or Sync providers with interactive OAuth.`,
+    `OAuth (Claude, Kiro, …): dashboard or Providers: Sync with interactive OAuth.`,
   );
 }
 
@@ -437,23 +437,20 @@ export async function connectKiro(): Promise<void> {
 export const providersCommands: Command[] = [
   {
     id: "sync-providers",
-    name: "Sync providers",
+    name: "Providers: Sync",
     description: "Create or refresh provider connections from Vault/env",
-    group: "providers",
     run: syncProviders,
   },
   {
     id: "setup-provider-creds",
-    name: "Setup provider credentials",
+    name: "Providers: Setup credentials",
     description: "Paste API keys into Vault and connect them in 9Router",
-    group: "providers",
     run: setupProviderCreds,
   },
   {
     id: "connect-kiro",
-    name: "Connect Kiro",
+    name: "Providers: Connect Kiro",
     description: "Run device-code OAuth for the Kiro provider",
-    group: "providers",
     run: connectKiro,
   },
 ];

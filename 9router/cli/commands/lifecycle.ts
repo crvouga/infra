@@ -42,7 +42,7 @@ function printAlreadyRunning(port: string): void {
   );
   console.log(`  logs:    ${APP_LOG_FILE}`);
   console.log(`           ${TUNNEL_LOG_FILE}`);
-  console.log("  Use Status or Stop daemons from the menu.");
+  console.log("  Use Daemons: Status or Daemons: Stop from the menu.");
 }
 
 export async function startDaemons(): Promise<void> {
@@ -54,23 +54,23 @@ export async function startDaemons(): Promise<void> {
   }
 
   if (!existsSync(ENV_FILE)) {
-    throw new CommandError(`Missing ${ENV_FILE}. Run Pull secrets first.`);
+    throw new CommandError(`Missing ${ENV_FILE}. Run Secrets: Pull first.`);
   }
   if (!existsSync(join(APP_DIR, "package.json"))) {
     throw new CommandError(
-      "App not cloned. Run Full setup (or Sync app → Install → Build).",
+      "App not cloned. Run Setup: Full (or App: Sync → App: Install deps → App: Build).",
     );
   }
   if (!existsSync(join(APP_DIR, ".next", "BUILD_ID"))) {
     throw new CommandError(
-      "App not built (missing .next/BUILD_ID). Run Build app first.",
+      "App not built (missing .next/BUILD_ID). Run App: Build first.",
     );
   }
   if (!existsSync(CLOUDFLARED_CONFIG)) {
     throw new CommandError(
       [
         `Missing ${CLOUDFLARED_CONFIG}`,
-        "Run Provision tunnel once first.",
+        "Run Tunnel: Provision once first.",
         "(requires: brew install cloudflared && cloudflared tunnel login)",
       ].join("\n"),
     );
@@ -105,7 +105,7 @@ export async function startDaemons(): Promise<void> {
 
   for (const key of SECRET_KEYS) {
     if (!process.env[key]?.trim()) {
-      throw new CommandError(`${key} is empty in .env. Run Pull secrets.`);
+      throw new CommandError(`${key} is empty in .env. Run Secrets: Pull.`);
     }
   }
 
@@ -127,7 +127,7 @@ export async function startDaemons(): Promise<void> {
     throw new CommandError(
       [
         `Port ${port} is already in use (pid ${portPids.join(", ")})`,
-        "Run Stop daemons first.",
+        "Run Daemons: Stop first.",
       ].join("\n"),
     );
   }
@@ -260,23 +260,20 @@ export async function showStatus(): Promise<void> {
 export const lifecycleCommands: Command[] = [
   {
     id: "start",
-    name: "Start daemons",
+    name: "Daemons: Start",
     description: "Daemonize 9Router and the Cloudflare named tunnel",
-    group: "lifecycle",
     run: startDaemons,
   },
   {
     id: "stop",
-    name: "Stop daemons",
+    name: "Daemons: Stop",
     description: "Stop app and tunnel daemons; free the app port",
-    group: "lifecycle",
     run: stopDaemons,
   },
   {
     id: "status",
-    name: "Status",
+    name: "Daemons: Status",
     description: "Show pids, port listeners, local/public URLs, and log paths",
-    group: "lifecycle",
     run: showStatus,
   },
 ];

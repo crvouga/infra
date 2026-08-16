@@ -82,9 +82,9 @@ function ingestSetCookies(res: Response, jar: CookieJar): void {
     typeof anyHeaders.getSetCookie === "function"
       ? anyHeaders.getSetCookie()
       : (() => {
-          const single = res.headers.get("set-cookie");
-          return single ? [single] : [];
-        })();
+        const single = res.headers.get("set-cookie");
+        return single ? [single] : [];
+      })();
 
   for (const raw of cookies) {
     const pair = raw.split(";")[0]?.trim();
@@ -136,7 +136,7 @@ export class NineRouterClient {
     } catch (err) {
       if (err instanceof Error && err.name === "TimeoutError") {
         throw new Error(
-          `9Router at ${this.baseUrl} did not respond within ${FETCH_TIMEOUT_MS / 1000}s — is it running? (npm start → Start daemons)`,
+          `9Router at ${this.baseUrl} did not respond within ${FETCH_TIMEOUT_MS / 1000}s — is it running? (npm start → Daemons: Start)`,
         );
       }
       throw err;
@@ -165,12 +165,12 @@ export class NineRouterClient {
       res = await this.fetch("/api/health");
     } catch (err) {
       throw new Error(
-        `9Router is not reachable at ${this.baseUrl}. Start it with: npm start → Start daemons\n${String(err)}`,
+        `9Router is not reachable at ${this.baseUrl}. Start it with: npm start → Daemons: Start\n${String(err)}`,
       );
     }
     if (!res.ok) {
       throw new Error(
-        `9Router health check failed at ${this.baseUrl} (${res.status}). Start it with: npm start → Start daemons`,
+        `9Router health check failed at ${this.baseUrl} (${res.status}). Start it with: npm start → Daemons: Start`,
       );
     }
   }
@@ -242,7 +242,7 @@ export async function createAuthedClient(): Promise<NineRouterClient> {
           ? `CLI token from ${found.dataDir} was rejected.`
           : `No machine-id/cli-secret found under: ${candidateDataDirs().join(", ")}`,
         `Set DATA_DIR in ${ENV_FILE} to the running instance, or fetch secrets:`,
-        "  npm start → Pull secrets",
+        "  npm start → Secrets: Pull",
         "  vault run -- npm start",
       ].join("\n"),
     );

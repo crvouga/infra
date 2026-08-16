@@ -36,7 +36,7 @@ Fix one of:
   1. Re-login, then retry:
        vault login -method=userpass username=crvouga
        # or: vault login <root-or-dev-token>
-       cd 9router && npm start   # Pull secrets
+       cd 9router && npm start   # Secrets: Pull
 
   2. Inject via vault run (same login required):
        vault run -- npm start   # then choose the command from the menu

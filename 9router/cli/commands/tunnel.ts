@@ -126,19 +126,19 @@ export async function provisionTunnel(): Promise<void> {
   console.log("");
   console.log("OK — named tunnel provisioned.");
   console.log(`  Public URL: ${CURSOR_PUBLIC_BASE_URL}`);
-  console.log("  Next: Start daemons, then Sync Cursor.");
+  console.log("  Next: Daemons: Start, then Cursor: Sync.");
 }
 
 export async function foregroundTunnel(): Promise<void> {
   console.log(
-    "Note: day-to-day use is Start daemons (app + tunnel together).",
+    "Note: day-to-day use is Daemons: Start (app + tunnel together).",
   );
   console.log("This runs the tunnel in the foreground for debugging.");
   console.log("");
 
   const ok = await askConfirm(
     "Run foreground tunnel?",
-    "Blocks this terminal until you stop it (Ctrl+C). Prefer Start daemons for normal use.",
+    "Blocks this terminal until you stop it (Ctrl+C). Prefer Daemons: Start for normal use.",
     false,
   );
   if (!ok) {
@@ -152,7 +152,7 @@ export async function foregroundTunnel(): Promise<void> {
     throw new CommandError(
       [
         `Missing ${CLOUDFLARED_CONFIG}`,
-        "Run Provision tunnel once first.",
+        "Run Tunnel: Provision once first.",
         "(requires: brew install cloudflared && cloudflared tunnel login)",
       ].join("\n"),
     );
@@ -201,17 +201,15 @@ export async function foregroundTunnel(): Promise<void> {
 export const tunnelCommands: Command[] = [
   {
     id: "provision-tunnel",
-    name: "Provision tunnel",
+    name: "Tunnel: Provision",
     description:
       "Create named Cloudflare tunnel + DNS for 9router.chrisvouga.dev",
-    group: "tunnel",
     run: provisionTunnel,
   },
   {
     id: "tunnel",
-    name: "Foreground tunnel",
+    name: "Tunnel: Foreground",
     description: "Debug: run the named tunnel in the foreground",
-    group: "tunnel",
     run: foregroundTunnel,
   },
 ];

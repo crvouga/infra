@@ -1,5 +1,9 @@
 import { createAuthedClient } from "../../scripts/lib/client.ts";
 import {
+  materializeCombosSpec,
+  formatMaterializeReport,
+} from "../../scripts/lib/combo-materialize.ts";
+import {
   buildStrategyPatch,
   createCombo,
   deleteCombo,
@@ -12,17 +16,17 @@ import {
   updateCombo,
   desiredStrategy,
   type ComboDiff,
+  type CombosSpec,
+  type CombosTemplateSpec,
 } from "../../scripts/lib/combos.ts";
 import {
   activeProviderIds,
   fetchProviderConnections,
   formatRegistryIssues,
   loadProviderIndex,
-  missingCredentialProviders,
-  providersReferencedBySpec,
   validateModelsAgainstRegistry,
+  type ProviderIndex,
 } from "../../scripts/lib/registry.ts";
-import { LOCAL_BASE_URL } from "../../scripts/lib/paths.ts";
 import { askConfirm } from "../prompt.ts";
 import { CommandError, type Command } from "../types.ts";
 
@@ -46,6 +50,22 @@ async function applyDiffs(
   }
 }
 
+async function loadDesiredSpec(opts: {
+  client: Awaited<ReturnType<typeof createAuthedClient>>;
+  index: ProviderIndex;
+}): Promise<{ template: CombosTemplateSpec; desired: CombosSpec }> {
+  const template = loadCombosSpec();
+  const connections = await fetchProviderConnections(opts.client);
+  const active = activeProviderIds(connections, opts.index);
+  console.log(
+    `==> Connected providers (${active.size}): ${[...active].sort().join(", ") || "(none)"}`,
+  );
+
+  const result = materializeCombosSpec(template, active, opts.index);
+  console.log(`==> ${formatMaterializeReport(result).split("\n").join("\n    ")}`);
+  return { template, desired: result.spec };
+}
+
 export async function syncCombos(): Promise<void> {
   const dryRun = await askConfirm(
     "Dry run only?",
@@ -54,15 +74,22 @@ export async function syncCombos(): Promise<void> {
   );
   const prune = await askConfirm(
     "Prune remote combos?",
-    "Delete remote LLM combos that are not listed in combos.yaml.",
-    false,
+    "Delete remote LLM combos not in the materialized set (dropped empty variants).",
+    true,
   );
 
-  const spec = loadCombosSpec();
+  const index = await loadProviderIndex();
   const client = await createAuthedClient();
+  const { desired } = await loadDesiredSpec({ client, index });
+
+  if (desired.combos.length === 0) {
+    throw new CommandError(
+      "No combos to sync — connect at least one provider used by combos.yaml roles/tiers, then retry.",
+    );
+  }
 
   const remote = await fetchCombos(client);
-  const diffs = diffCombos(spec, remote);
+  const diffs = diffCombos(desired, remote);
   const actionable = diffs.filter((d) => d.kind !== "extra" || prune);
 
   console.log(`==> Combos vs ${client.baseUrl}`);
@@ -85,7 +112,7 @@ export async function syncCombos(): Promise<void> {
   }
 
   const existing = await fetchComboStrategies(client);
-  const next = buildStrategyPatch(spec, existing, prune);
+  const next = buildStrategyPatch(desired, existing, prune);
   const before = JSON.stringify(existing);
   const after = JSON.stringify(next);
   if (before !== after) {
@@ -95,7 +122,7 @@ export async function syncCombos(): Promise<void> {
     console.log("==> comboStrategies already match");
   }
 
-  const verify = diffCombos(spec, await fetchCombos(client)).filter(
+  const verify = diffCombos(desired, await fetchCombos(client)).filter(
     (d) => d.kind !== "extra" || prune,
   );
   if (verify.length > 0) {
@@ -104,28 +131,34 @@ export async function syncCombos(): Promise<void> {
     );
   }
 
-  console.log(`OK — ${spec.combos.length} combos in sync`);
+  console.log(`OK — ${desired.combos.length} combos in sync`);
 }
 
 export async function checkCombos(): Promise<void> {
-  const spec = loadCombosSpec();
   const index = await loadProviderIndex();
-  const registryIssues = validateModelsAgainstRegistry(spec, index);
+  const client = await createAuthedClient();
+  const { desired } = await loadDesiredSpec({ client, index });
 
-  console.log(`==> Registry check (local app clone)`);
+  console.log(`==> Registry check (materialized models)`);
+  const registryIssues = validateModelsAgainstRegistry(desired, index);
   console.log(formatRegistryIssues(registryIssues));
 
-  const client = await createAuthedClient();
+  if (desired.combos.length === 0) {
+    throw new CommandError(
+      "No materialized combos — connect providers used by combos.yaml, then Combos: Sync.",
+    );
+  }
+
   const remote = await fetchCombos(client);
-  const diffs = diffCombos(spec, remote);
+  const diffs = diffCombos(desired, remote);
   const strategies = await fetchComboStrategies(client);
 
-  console.log(`\n==> Check combos @ ${client.baseUrl}`);
+  console.log(`\n==> Check combos @ ${client.baseUrl} (materialized)`);
   console.log(formatDiffs(diffs));
 
   let strategyDrift = 0;
-  for (const combo of spec.combos) {
-    const want = desiredStrategy(combo, spec.defaults);
+  for (const combo of desired.combos) {
+    const want = desiredStrategy(combo, desired.defaults);
     const got = strategies[combo.name]?.fallbackStrategy ?? "fallback";
     if (want !== got) {
       strategyDrift += 1;
@@ -133,56 +166,39 @@ export async function checkCombos(): Promise<void> {
     }
   }
 
-  const connections = await fetchProviderConnections(client);
-  const needed = providersReferencedBySpec(spec, index);
-  const active = activeProviderIds(connections, index);
-  const missingCreds = missingCredentialProviders(needed, active);
-
   console.log(`\n==> Provider credentials`);
-  if (missingCreds.length === 0) {
-    console.log(
-      `All ${needed.size} provider(s) referenced by combos have an active connection.`,
-    );
-  } else {
-    console.log(
-      `Missing active credentials for: ${missingCreds.join(", ")}`,
-    );
-    console.log(
-      `Open ${LOCAL_BASE_URL} → Providers and connect them (OAuth or API key).`,
-    );
-    console.log(
-      `Cursor 404 / providerStatusCode 404 usually means no credentials for every tier in the combo.`,
-    );
-  }
+  console.log(
+    "Semantic mode: unconnected providers skip tiers (not a hard fail).",
+  );
+  console.log(
+    `Active combos: ${desired.combos.length} (models resolved from connected providers only).`,
+  );
 
   const blocking = diffs.filter(
     (d) => d.kind === "missing" || d.kind === "drifted",
   );
   const failed =
-    blocking.length > 0 ||
-    strategyDrift > 0 ||
-    registryIssues.length > 0 ||
-    missingCreds.length > 0;
+    blocking.length > 0 || strategyDrift > 0 || registryIssues.length > 0;
 
   const extras = diffs.filter((d) => d.kind === "extra");
   if (failed) {
     if (extras.length > 0) {
       console.log(
-        `\nNote: ${extras.length} extra remote combo(s) (ignored; use Sync combos with prune to remove)`,
+        `\nNote: ${extras.length} extra remote combo(s) (use Combos: Sync with prune to remove)`,
       );
     }
     throw new CommandError(
-      "Combo check failed — see registry, drift, or credential issues above.",
+      "Combo check failed — see registry or drift vs materialized desired above.",
     );
   }
 
   if (extras.length > 0) {
     console.log(
-      `\nOK (spec satisfied). ${extras.length} extra remote combo(s) not in combos.yaml.`,
+      `\nOK (materialized spec satisfied). ${extras.length} extra remote combo(s) not in desired set.`,
     );
   } else {
     console.log(
-      `\nOK — ${spec.combos.length} combos match the spec, registry, and credentials`,
+      `\nOK — ${desired.combos.length} materialized combos match remote + registry`,
     );
   }
 }
@@ -190,16 +206,16 @@ export async function checkCombos(): Promise<void> {
 export const combosCommands: Command[] = [
   {
     id: "sync-combos",
-    name: "Sync combos",
-    description: "Upsert combos and strategies from combos.yaml",
-    group: "combos",
+    name: "Combos: Sync",
+    description:
+      "Resolve semantic combos.yaml tiers from connected providers and upsert",
     run: syncCombos,
   },
   {
     id: "check-combos",
-    name: "Check combos",
-    description: "Validate registry models, combo drift, and credentials",
-    group: "combos",
+    name: "Combos: Check",
+    description:
+      "Validate materialized combos against registry and remote",
     run: checkCombos,
   },
 ];

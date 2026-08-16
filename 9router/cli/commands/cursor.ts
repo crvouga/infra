@@ -1,6 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createAuthedClient } from "../../scripts/lib/client.ts";
+import {
+  formatMaterializeReport,
+  materializeCombosSpec,
+} from "../../scripts/lib/combo-materialize.ts";
 import { loadCombosSpec } from "../../scripts/lib/combos.ts";
 import {
   assertCursorQuitOrForce,
@@ -20,6 +24,11 @@ import {
   writeOpenAIKeySecret,
 } from "../../scripts/lib/cursor.ts";
 import { CURSOR_PUBLIC_BASE_URL, ROOT } from "../../scripts/lib/paths.ts";
+import {
+  activeProviderIds,
+  fetchProviderConnections,
+  loadProviderIndex,
+} from "../../scripts/lib/registry.ts";
 import { askConfirm, askInput, askSelect } from "../prompt.ts";
 import { CommandError, type Command } from "../types.ts";
 
@@ -73,9 +82,9 @@ function assertPublicOrAllowed(
       "Cursor's cloud backend blocks loopback/RFC1918 addresses (SSRF protection).",
       "Use the stable public hostname:",
       "",
-      "  Provision tunnel (once)",
-      "  Start daemons (app + tunnel → 9router.chrisvouga.dev)",
-      "  Sync Cursor (writes https://9router.chrisvouga.dev/v1)",
+      "  Tunnel: Provision (once)",
+      "  Daemons: Start (app + tunnel → 9router.chrisvouga.dev)",
+      "  Cursor: Sync (writes https://9router.chrisvouga.dev/v1)",
       "",
       "Allow private base URL only if you intentionally want localhost (will not work in Agent).",
     ].join("\n"),
@@ -228,14 +237,27 @@ export async function syncCursor(): Promise<void> {
     logStep("Cursor DB not locked by another process");
   }
 
-  logStep("Loading combos.yaml…");
-  const spec = loadCombosSpec();
-  const comboNames = spec.combos.map((c) => c.name);
+  logStep("Loading combos.yaml templates + connected providers…");
+  const template = loadCombosSpec();
+  const index = await loadProviderIndex();
+  const clientForCombos = await createAuthedClient();
+  const connections = await fetchProviderConnections(clientForCombos);
+  const active = activeProviderIds(connections, index);
+  const materialized = materializeCombosSpec(template, active, index);
+  console.log(`==> ${formatMaterializeReport(materialized).split("\n").join("\n    ")}`);
+
+  const comboNames = materialized.spec.combos.map((c) => c.name);
+  if (comboNames.length === 0) {
+    throw new CommandError(
+      "No materialized combos — connect providers and Combos: Sync first.",
+    );
+  }
+
   const { raw, source } = resolveCursorOpenAIBaseUrl(baseUrl);
   const openAIBaseUrl = openAIBaseUrlFromRouter(raw);
   assertPublicOrAllowed(openAIBaseUrl, allowPrivate, source);
   const lastSynced = readLastSyncedCombos();
-  logStep(`Loaded ${comboNames.length} combos`);
+  logStep(`Loaded ${comboNames.length} materialized combos`);
 
   console.log(`==> 9Router OpenAI base: ${openAIBaseUrl} (from ${source})`);
   console.log(`==> Combos: ${comboNames.join(", ")}`);
@@ -243,8 +265,7 @@ export async function syncCursor(): Promise<void> {
   let apiKey = "";
   let keyCreated = false;
   if (!dryRun) {
-    const client = await createAuthedClient();
-    const ensured = await ensureCursorApiKey(client, keyName);
+    const ensured = await ensureCursorApiKey(clientForCombos, keyName);
     apiKey = ensured.key;
     keyCreated = ensured.created;
     console.log(
@@ -324,7 +345,7 @@ export async function syncCursor(): Promise<void> {
       keyWritten
         ? "Reopen Cursor (or Reload Window), then pick a combo model (e.g. 9router-free, 9router-max-sub-claude)."
         : "Reopen Cursor, paste the API key above if prompted, then pick a combo model.",
-      `Keep daemons up (Start daemons) so ${CURSOR_PUBLIC_BASE_URL} reaches local 9Router.`,
+      `Keep daemons up (Daemons: Start) so ${CURSOR_PUBLIC_BASE_URL} reaches local 9Router.`,
     ].join("\n"),
   );
 }
@@ -332,10 +353,9 @@ export async function syncCursor(): Promise<void> {
 export const cursorCommands: Command[] = [
   {
     id: "sync-cursor",
-    name: "Sync Cursor",
+    name: "Cursor: Sync",
     description:
-      "Write BYOK base URL, API key, and combo models into Cursor state.vscdb",
-    group: "cursor",
+      "Write BYOK base URL, API key, and materialized combo models into Cursor state.vscdb",
     run: syncCursor,
   },
 ];
